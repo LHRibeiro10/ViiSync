@@ -25,6 +25,7 @@ const {
   fetchMercadoLivreIntegrationStatus,
   handleMercadoLivreWebhook,
   handleMercadoLivreOAuthCallback,
+  startMercadoLivreAuthorization,
 } = require("./src/modules/mercadolivreQuestions/mercadolivreQuestions.controller");
 
 const app = express();
@@ -125,6 +126,7 @@ app.use("/admin-console", adminConsoleRoutes);
 app.use("/assistant", assistantRoutes);
 app.get("/integrations/mercadolivre/status", fetchMercadoLivreIntegrationStatus);
 app.get("/integrations/mercadolivre/auth/url", fetchMercadoLivreAuthorizationUrl);
+app.get("/integrations/mercadolivre/auth/start", startMercadoLivreAuthorization);
 app.get(
   "/integrations/mercadolivre/oauth/callback",
   handleMercadoLivreOAuthCallback

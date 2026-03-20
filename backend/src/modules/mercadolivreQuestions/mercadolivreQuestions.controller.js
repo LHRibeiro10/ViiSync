@@ -104,6 +104,15 @@ function fetchMercadoLivreAuthorizationUrl(req, res) {
   }
 }
 
+function startMercadoLivreAuthorization(req, res) {
+  try {
+    const payload = getAuthorizationUrl(req.query);
+    res.redirect(payload.authorizationUrl);
+  } catch (error) {
+    handleMercadoLivreError(error, res);
+  }
+}
+
 async function handleMercadoLivreOAuthCallback(req, res) {
   try {
     const payload = await completeAuthorizationCallback(req.query);
@@ -142,6 +151,7 @@ module.exports = {
   fetchMercadoLivreIntegrationStatus,
   handleMercadoLivreWebhook,
   handleMercadoLivreOAuthCallback,
+  startMercadoLivreAuthorization,
   postDismissAnsweredQuestions,
   postDismissQuestion,
   postQuestionReply,
