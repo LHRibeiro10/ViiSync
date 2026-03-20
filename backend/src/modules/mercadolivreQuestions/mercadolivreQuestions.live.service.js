@@ -1,14 +1,15 @@
-const { randomUUID } = require("crypto");
+const { createHmac, randomUUID, timingSafeEqual } = require("crypto");
 
 const DEFAULT_API_BASE_URL = "https://api.mercadolibre.com";
 const DEFAULT_AUTH_BASE_URL = "https://auth.mercadolivre.com.br/authorization";
 
-const pendingStates = new Map();
 const dismissedIds = new Set();
 const webhookEvents = [];
 let runtimeOAuth = null;
 let lastSyncAt = null;
 const OAUTH_STATE_TTL_MS = 10 * 60 * 1000;
+const OAUTH_STATE_MAX_CLOCK_SKEW_MS = 60 * 1000;
+const DEFAULT_OAUTH_STATE_SECRET = "viisync-mercadolivre-oauth-state";
 
 function env(name, fallbackValue = "") {
   const value = process.env[name];
@@ -67,13 +68,75 @@ function buildApiError(response, payload, fallbackMessage) {
   return createHttpError(500, message);
 }
 
-function pruneExpiredStates() {
-  const now = Date.now();
+function oauthStateSecret() {
+  return env(
+    "MERCADOLIVRE_OAUTH_STATE_SECRET",
+    env("MERCADOLIVRE_CLIENT_SECRET", DEFAULT_OAUTH_STATE_SECRET)
+  );
+}
 
-  for (const [state, metadata] of pendingStates.entries()) {
-    if (!metadata || now - metadata.createdAt > OAUTH_STATE_TTL_MS) {
-      pendingStates.delete(state);
-    }
+function signOAuthState(unsignedState) {
+  return createHmac("sha256", oauthStateSecret())
+    .update(String(unsignedState || ""))
+    .digest("hex");
+}
+
+function timingSafeEqualText(left, right) {
+  const leftBuffer = Buffer.from(String(left || ""));
+  const rightBuffer = Buffer.from(String(right || ""));
+
+  if (leftBuffer.length !== rightBuffer.length) {
+    return false;
+  }
+
+  return timingSafeEqual(leftBuffer, rightBuffer);
+}
+
+function createOAuthStateToken() {
+  const issuedAt = Date.now();
+  const nonce = randomUUID().replace(/-/g, "");
+  const unsignedState = `${issuedAt}.${nonce}`;
+  const signature = signOAuthState(unsignedState);
+
+  return `${unsignedState}.${signature}`;
+}
+
+function assertValidOAuthState(state) {
+  const stateText = String(state || "").trim();
+
+  if (!stateText) {
+    throw createHttpError(400, "State OAuth invalido.");
+  }
+
+  const parts = stateText.split(".");
+
+  if (parts.length !== 3) {
+    throw createHttpError(400, "State OAuth invalido.");
+  }
+
+  const [issuedAtText, nonce, signature] = parts;
+
+  if (!issuedAtText || !nonce || !signature) {
+    throw createHttpError(400, "State OAuth invalido.");
+  }
+
+  const issuedAt = Number(issuedAtText);
+  if (!Number.isFinite(issuedAt)) {
+    throw createHttpError(400, "State OAuth invalido.");
+  }
+
+  const now = Date.now();
+  if (issuedAt > now + OAUTH_STATE_MAX_CLOCK_SKEW_MS) {
+    throw createHttpError(400, "State OAuth invalido.");
+  }
+
+  if (now - issuedAt > OAUTH_STATE_TTL_MS) {
+    throw createHttpError(400, "State OAuth expirado. Gere um novo link de autorizacao.");
+  }
+
+  const expectedSignature = signOAuthState(`${issuedAtText}.${nonce}`);
+  if (!timingSafeEqualText(signature, expectedSignature)) {
+    throw createHttpError(400, "State OAuth invalido.");
   }
 }
 
@@ -283,9 +346,8 @@ function getAuthorizationUrl(payload = {}) {
       "Defina MERCADOLIVRE_CLIENT_ID e MERCADOLIVRE_REDIRECT_URI para iniciar OAuth."
     );
   }
-  pruneExpiredStates();
-  const state = randomUUID();
-  pendingStates.set(state, { createdAt: Date.now(), payload });
+  // State assinado para funcionar em ambientes com restart/replicas sem depender de memoria local.
+  const state = createOAuthStateToken(payload);
   const url = new URL(env("MERCADOLIVRE_AUTH_BASE_URL", DEFAULT_AUTH_BASE_URL));
   url.searchParams.set("response_type", "code");
   url.searchParams.set("client_id", clientId);
@@ -298,9 +360,8 @@ async function completeAuthorizationCallback(query = {}) {
   if (query.error) throw createHttpError(400, query.error_description || "OAuth cancelado.");
   const state = String(query.state || "");
   const code = String(query.code || "");
-  pruneExpiredStates();
   if (!state || !code) throw createHttpError(400, "Callback OAuth invalido.");
-  if (!pendingStates.has(state)) throw createHttpError(400, "State OAuth invalido.");
+  assertValidOAuthState(state);
 
   const clientId = env("MERCADOLIVRE_CLIENT_ID");
   const clientSecret = env("MERCADOLIVRE_CLIENT_SECRET");
@@ -323,7 +384,6 @@ async function completeAuthorizationCallback(query = {}) {
   });
   const payload = await parseResponseBody(response);
   if (!response.ok) throw buildApiError(response, payload, "Falha no OAuth Mercado Livre.");
-  pendingStates.delete(state);
   runtimeOAuth = {
     accessToken: payload.access_token || null,
     sellerId: payload.user_id ? String(payload.user_id) : null,
