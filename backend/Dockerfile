@@ -13,6 +13,6 @@ COPY . .
 # Generate Prisma client with the real schema in place.
 RUN DATABASE_URL="postgresql://postgres:postgres@localhost:5432/postgres" npx prisma generate
 
-EXPOSE 3001
+EXPOSE 8080
 
 CMD ["npm", "run", "start"]
