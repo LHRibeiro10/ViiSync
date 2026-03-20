@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import PageHeader from "../components/PageHeader";
 import {
   getIntegrationsHub,
-  getMercadoLivreAuthorizationUrl,
+  getMercadoLivreAuthorizationStartUrl,
   getMercadoLivreIntegrationStatus,
 } from "../services/api";
 import { formatDateTime } from "../utils/presentation";
@@ -54,19 +54,10 @@ function IntegrationsHub() {
     window.setTimeout(() => setActionMessage(""), 2200);
   }
 
-  async function handleMercadoLivreReconnect(accountName) {
-    try {
-      const payload = await getMercadoLivreAuthorizationUrl({ accountName });
-
-      if (!payload.authorizationUrl) {
-        throw new Error("Nao foi possivel gerar URL de autorizacao.");
-      }
-
-      window.open(payload.authorizationUrl, "_blank", "noopener,noreferrer");
-      triggerMockAction("Fluxo OAuth do Mercado Livre aberto em nova aba.");
-    } catch (err) {
-      setError(err.message || "Nao foi possivel iniciar reconexao do Mercado Livre.");
-    }
+  function handleMercadoLivreReconnect(accountName) {
+    const authorizationStartUrl = getMercadoLivreAuthorizationStartUrl({ accountName });
+    window.open(authorizationStartUrl, "_blank", "noopener,noreferrer");
+    triggerMockAction("Fluxo OAuth do Mercado Livre aberto em nova aba.");
   }
 
   if (loading && !payload) {

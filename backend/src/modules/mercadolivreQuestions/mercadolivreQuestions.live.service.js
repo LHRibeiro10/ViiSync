@@ -1,4 +1,5 @@
 const { createHmac, randomUUID, timingSafeEqual } = require("crypto");
+const prisma = require("../../lib/prisma");
 
 const DEFAULT_API_BASE_URL = "https://api.mercadolibre.com";
 const DEFAULT_AUTH_BASE_URL = "https://auth.mercadolivre.com.br/authorization";
@@ -6,6 +7,7 @@ const DEFAULT_AUTH_BASE_URL = "https://auth.mercadolivre.com.br/authorization";
 const dismissedIds = new Set();
 const webhookEvents = [];
 let runtimeOAuth = null;
+let runtimeOAuthLoadedFromDb = false;
 let lastSyncAt = null;
 const OAUTH_STATE_TTL_MS = 10 * 60 * 1000;
 const OAUTH_STATE_MAX_CLOCK_SKEW_MS = 60 * 1000;
@@ -31,22 +33,82 @@ function apiBaseUrl() {
   return env("MERCADOLIVRE_API_BASE_URL", DEFAULT_API_BASE_URL);
 }
 
-function tokenSource() {
+function mercadoLivreAccountFilter() {
+  return {
+    OR: [
+      { marketplace: { contains: "mercado livre", mode: "insensitive" } },
+      { marketplace: { contains: "mercadolivre", mode: "insensitive" } },
+      { marketplace: { contains: "mercado", mode: "insensitive" } },
+    ],
+  };
+}
+
+async function loadRuntimeOAuthFromDatabase() {
+  if (runtimeOAuth?.accessToken || runtimeOAuthLoadedFromDb) {
+    return;
+  }
+
+  runtimeOAuthLoadedFromDb = true;
+
+  try {
+    const persistedAccount = await prisma.marketplaceAccount.findFirst({
+      where: {
+        ...mercadoLivreAccountFilter(),
+        isActive: true,
+        accessToken: {
+          not: null,
+        },
+      },
+      orderBy: {
+        updatedAt: "desc",
+      },
+    });
+
+    if (!persistedAccount?.accessToken) {
+      return;
+    }
+
+    runtimeOAuth = {
+      accessToken: persistedAccount.accessToken,
+      refreshToken: persistedAccount.refreshToken || null,
+      sellerId: persistedAccount.sellerId || null,
+      tokenExpiresAt: persistedAccount.tokenExpiresAt
+        ? persistedAccount.tokenExpiresAt.toISOString()
+        : null,
+      accountId: persistedAccount.id,
+      accountName: persistedAccount.accountName,
+      source: "database",
+    };
+  } catch (error) {
+    console.error("[mercadolivre-oauth:load-db]", error);
+  }
+}
+
+async function tokenSource() {
   if (runtimeOAuth && runtimeOAuth.accessToken) {
     return { ...runtimeOAuth };
   }
 
   const accessToken = env("MERCADOLIVRE_ACCESS_TOKEN");
-  if (!accessToken) return null;
+  if (accessToken) {
+    return {
+      accessToken,
+      sellerId: env("MERCADOLIVRE_SELLER_ID") || null,
+      source: "env",
+    };
+  }
 
-  return {
-    accessToken,
-    sellerId: env("MERCADOLIVRE_SELLER_ID") || null,
-  };
+  await loadRuntimeOAuthFromDatabase();
+
+  if (runtimeOAuth && runtimeOAuth.accessToken) {
+    return { ...runtimeOAuth };
+  }
+
+  return null;
 }
 
-function hasLiveCredentials() {
-  return Boolean(tokenSource());
+async function hasLiveCredentials() {
+  return Boolean(await tokenSource());
 }
 
 function createHttpError(status, message) {
@@ -151,7 +213,7 @@ async function parseResponseBody(response) {
 }
 
 async function meliRequest(pathname, options = {}) {
-  const source = tokenSource();
+  const source = await tokenSource();
   if (!source || !source.accessToken) {
     throw createHttpError(
       400,
@@ -188,7 +250,7 @@ async function meliRequest(pathname, options = {}) {
 }
 
 async function resolveSellerId() {
-  const source = tokenSource();
+  const source = await tokenSource();
   if (source && source.sellerId) return source.sellerId;
   const me = await meliRequest("/users/me");
   if (!me || !me.id) {
@@ -337,6 +399,84 @@ async function syncQuestions(filters = {}) {
   };
 }
 
+function resolveTokenExpiresAt(expiresIn) {
+  const expiresInSeconds = Number(expiresIn);
+
+  if (!Number.isFinite(expiresInSeconds) || expiresInSeconds <= 0) {
+    return null;
+  }
+
+  return new Date(Date.now() + expiresInSeconds * 1000);
+}
+
+async function persistOAuthCredentials({
+  accessToken,
+  refreshToken = null,
+  sellerId = null,
+  tokenExpiresAt = null,
+}) {
+  try {
+    const normalizedSellerId = sellerId ? String(sellerId) : null;
+    const marketplaceFilter = mercadoLivreAccountFilter();
+
+    let account = null;
+
+    if (normalizedSellerId) {
+      account = await prisma.marketplaceAccount.findFirst({
+        where: {
+          ...marketplaceFilter,
+          sellerId: normalizedSellerId,
+        },
+        orderBy: {
+          updatedAt: "desc",
+        },
+      });
+    }
+
+    if (!account) {
+      account = await prisma.marketplaceAccount.findFirst({
+        where: marketplaceFilter,
+        orderBy: {
+          createdAt: "asc",
+        },
+      });
+    }
+
+    if (!account) {
+      return {
+        persisted: false,
+        reason: "Nenhuma conta Mercado Livre encontrada para persistir o token OAuth.",
+      };
+    }
+
+    const updatedAccount = await prisma.marketplaceAccount.update({
+      where: {
+        id: account.id,
+      },
+      data: {
+        sellerId: normalizedSellerId || account.sellerId,
+        accessToken,
+        refreshToken: refreshToken || account.refreshToken,
+        tokenExpiresAt,
+        isActive: true,
+      },
+    });
+
+    return {
+      persisted: true,
+      reason: `Token OAuth salvo na conta ${updatedAccount.accountName}.`,
+      accountId: updatedAccount.id,
+      accountName: updatedAccount.accountName,
+    };
+  } catch (error) {
+    console.error("[mercadolivre-oauth:persist-db]", error);
+    return {
+      persisted: false,
+      reason: "Falha ao salvar token OAuth no banco.",
+    };
+  }
+}
+
 function getAuthorizationUrl(payload = {}) {
   const clientId = env("MERCADOLIVRE_CLIENT_ID");
   const redirectUri = env("MERCADOLIVRE_REDIRECT_URI");
@@ -384,21 +524,43 @@ async function completeAuthorizationCallback(query = {}) {
   });
   const payload = await parseResponseBody(response);
   if (!response.ok) throw buildApiError(response, payload, "Falha no OAuth Mercado Livre.");
-  runtimeOAuth = {
-    accessToken: payload.access_token || null,
-    sellerId: payload.user_id ? String(payload.user_id) : null,
-  };
-  if (!runtimeOAuth.accessToken) {
+
+  const accessToken = payload.access_token || null;
+  if (!accessToken) {
     throw createHttpError(
       500,
       "OAuth retornou sem access_token. Verifique escopos e configuracao do app no Mercado Livre."
     );
   }
+
+  const tokenExpiresAt = resolveTokenExpiresAt(payload.expires_in);
+  const persisted = await persistOAuthCredentials({
+    accessToken,
+    refreshToken: payload.refresh_token || null,
+    sellerId: payload.user_id ? String(payload.user_id) : null,
+    tokenExpiresAt,
+  });
+
+  runtimeOAuth = {
+    accessToken,
+    refreshToken: payload.refresh_token || null,
+    sellerId: payload.user_id ? String(payload.user_id) : null,
+    tokenExpiresAt: tokenExpiresAt ? tokenExpiresAt.toISOString() : null,
+    source: "oauth-runtime",
+    accountId: persisted.accountId || null,
+    accountName: persisted.accountName || null,
+  };
   return {
     connected: true,
     mode: "oauth",
-    account: { sellerId: runtimeOAuth.sellerId },
-    persistence: { persisted: false, reason: "Sessao em memoria (runtime)." },
+    account: {
+      sellerId: runtimeOAuth.sellerId,
+      accountName: runtimeOAuth.accountName,
+    },
+    persistence: {
+      persisted: Boolean(persisted.persisted),
+      reason: persisted.reason || "Sessao em memoria (runtime).",
+    },
   };
 }
 
@@ -413,7 +575,7 @@ async function receiveWebhook(payload = {}) {
   if (webhookEvents.length > 20) webhookEvents.length = 20;
   return {
     received: true,
-    mode: hasLiveCredentials() ? "live" : "mock",
+    mode: (await hasLiveCredentials()) ? "live" : "mock",
     eventId,
     queued: false,
     latestEvents: webhookEvents.slice(0, 5).map((event) => ({ ...event })),
@@ -421,13 +583,19 @@ async function receiveWebhook(payload = {}) {
 }
 
 async function getIntegrationStatus() {
-  const source = tokenSource();
+  const source = await tokenSource();
   return {
     mode: mode(),
     usingLive: mode() === "live" || (mode() === "auto" && Boolean(source)),
     hasCredentials: Boolean(source),
-    source: source ? (runtimeOAuth ? "oauth-runtime" : "env") : "none",
-    account: source ? { sellerId: source.sellerId || null } : null,
+    source: source ? source.source || "unknown" : "none",
+    account: source
+      ? {
+          sellerId: source.sellerId || null,
+          accountName: source.accountName || null,
+          tokenExpiresAt: source.tokenExpiresAt || null,
+        }
+      : null,
     instructions: source
       ? null
       : "Conecte via OAuth ou configure MERCADOLIVRE_ACCESS_TOKEN no backend/.env.",

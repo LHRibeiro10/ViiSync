@@ -357,6 +357,10 @@ export async function getMercadoLivreAuthorizationUrl(params = {}) {
   );
 }
 
+export function getMercadoLivreAuthorizationStartUrl(params = {}) {
+  return `${API_BASE_URL}/integrations/mercadolivre/auth/start${buildQueryString(params)}`;
+}
+
 export async function getMercadoLivreQuestion(questionId) {
   return requestJson(`/integrations/mercadolivre/questions/${questionId}`);
 }
