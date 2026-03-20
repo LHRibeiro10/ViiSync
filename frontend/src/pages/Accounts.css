@@ -1,0 +1,302 @@
+.accounts-page {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.accounts-header {
+  position: relative;
+  overflow: hidden;
+  background: var(--panel-surface-strong);
+  backdrop-filter: blur(14px);
+  border: 1px solid var(--border-strong);
+  border-radius: 28px;
+  padding: 28px;
+  box-shadow: var(--card-shadow), var(--surface-shadow-inset);
+  display: flex;
+  justify-content: space-between;
+  gap: 18px;
+  align-items: center;
+}
+
+.accounts-header::before,
+.account-card::before,
+.accounts-modal::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: var(--panel-sheen);
+  pointer-events: none;
+}
+
+.accounts-header::after,
+.account-card::after,
+.accounts-modal::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: var(--section-glow);
+  pointer-events: none;
+}
+
+.accounts-header > *,
+.account-card > *,
+.accounts-modal > * {
+  position: relative;
+  z-index: 1;
+}
+
+.accounts-header h1 {
+  margin: 8px 0;
+  font-size: 38px;
+  line-height: 1.05;
+  letter-spacing: -0.04em;
+  color: var(--text-strong);
+}
+
+.accounts-header p {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 16px;
+}
+
+.accounts-primary-button {
+  min-width: 160px;
+  min-height: 50px;
+  border: 1px solid transparent;
+  background: linear-gradient(135deg, var(--accent-strong) 0%, var(--accent) 100%);
+  color: #ffffff;
+  padding: 14px 18px;
+  border-radius: 14px;
+  font-weight: 800;
+  cursor: pointer;
+  box-shadow: var(--button-primary-shadow);
+  transition: transform 0.2s ease, filter 0.2s ease;
+}
+
+.accounts-primary-button:hover {
+  transform: translateY(-1px);
+  filter: brightness(1.03);
+  box-shadow: var(--button-primary-shadow-hover);
+}
+
+.accounts-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.account-card {
+  position: relative;
+  overflow: hidden;
+  background: var(--panel-surface);
+  backdrop-filter: blur(14px);
+  border-radius: 24px;
+  padding: 22px;
+  border: 1px solid var(--border-strong);
+  box-shadow: var(--card-shadow), var(--surface-shadow-inset);
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.account-card-top {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.account-card-top h2 {
+  margin: 0 0 6px;
+  font-size: 22px;
+  color: var(--text-strong);
+}
+
+.account-card-top p {
+  margin: 0;
+  color: var(--text-muted);
+}
+
+.account-status {
+  padding: 8px 12px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  font-size: 12px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.account-status.connected {
+  background: var(--success-soft);
+  border-color: var(--success-border);
+  color: var(--success);
+}
+
+.account-status.pending {
+  background: var(--warning-soft);
+  border-color: var(--warning-border);
+  color: var(--warning);
+}
+
+.account-info {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px 0;
+  border-top: 1px solid var(--row-border);
+  border-bottom: 1px solid var(--row-border);
+}
+
+.account-info-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+}
+
+.account-info-row span {
+  color: var(--text-muted);
+  font-size: 14px;
+}
+
+.account-info-row strong {
+  color: var(--text-strong);
+}
+
+.account-actions,
+.accounts-modal-actions {
+  display: flex;
+  gap: 10px;
+}
+
+.account-actions button,
+.accounts-modal-actions button,
+.accounts-modal .ghost {
+  min-height: 46px;
+  flex: 1;
+  padding: 12px;
+  border-radius: 12px;
+  font-weight: 800;
+  cursor: pointer;
+  transition:
+    transform 0.2s ease,
+    background-color 0.2s ease,
+    border-color 0.2s ease,
+    box-shadow 0.2s ease;
+}
+
+.account-actions button:hover,
+.accounts-modal-actions button:hover,
+.accounts-modal .ghost:hover {
+  transform: translateY(-1px);
+}
+
+.account-actions .secondary,
+.accounts-modal-actions .secondary {
+  border: 1px solid transparent;
+  background: linear-gradient(135deg, var(--accent-strong) 0%, var(--accent) 100%);
+  color: #ffffff;
+  box-shadow: var(--button-primary-shadow);
+}
+
+.account-actions .secondary:hover,
+.accounts-modal-actions .secondary:hover {
+  box-shadow: var(--button-primary-shadow-hover);
+}
+
+.account-actions .ghost,
+.accounts-modal .ghost {
+  border: 1px solid var(--input-border);
+  background: var(--panel-surface-inset);
+  color: var(--text-strong);
+  box-shadow: var(--button-secondary-shadow);
+}
+
+.account-actions .ghost:hover,
+.accounts-modal .ghost:hover {
+  background: var(--surface-4);
+  box-shadow: var(--interactive-shadow-hover);
+}
+
+.accounts-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: var(--overlay);
+  backdrop-filter: blur(14px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  z-index: 1000;
+}
+
+.accounts-modal {
+  position: relative;
+  width: 100%;
+  max-width: 420px;
+  max-height: min(88vh, 720px);
+  overflow-y: auto;
+  background: var(--panel-surface-strong);
+  border: 1px solid var(--border-strong);
+  border-radius: 24px;
+  padding: 24px;
+  box-shadow: var(--card-shadow-strong), var(--surface-shadow-inset);
+}
+
+.accounts-modal h2 {
+  margin: 0 0 10px;
+  color: var(--text-strong);
+}
+
+.accounts-modal p {
+  margin: 0 0 20px;
+  color: var(--text-muted);
+}
+
+.accounts-modal-actions {
+  margin-bottom: 14px;
+}
+
+.close-button {
+  width: 100%;
+}
+
+.accounts-feedback {
+  background: var(--accent-soft);
+  color: var(--accent);
+  border: 1px solid var(--accent-soft-strong);
+  padding: 14px 16px;
+  border-radius: 16px;
+  font-weight: 700;
+  box-shadow: var(--button-secondary-shadow);
+}
+
+@media (max-width: 1100px) {
+  .accounts-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+@media (max-width: 760px) {
+  .accounts-header {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .accounts-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .accounts-header h1 {
+    font-size: 28px;
+  }
+
+  .account-card-top,
+  .account-info-row,
+  .account-actions,
+  .accounts-modal-actions {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}

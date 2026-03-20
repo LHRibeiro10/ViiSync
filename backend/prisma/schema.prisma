@@ -1,0 +1,252 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum UserRole {
+  SELLER
+  ADMIN
+  SUPPORT
+}
+
+enum UserStatus {
+  PENDING
+  ACTIVE
+  SUSPENDED
+}
+
+enum OrganizationMembershipRole {
+  OWNER
+  ADMIN
+  OPERATOR
+  VIEWER
+}
+
+model User {
+  id              String     @id @default(uuid())
+  name            String
+  email           String     @unique
+  passwordHash    String
+  role            UserRole   @default(SELLER)
+  status          UserStatus @default(PENDING)
+  emailVerifiedAt DateTime?
+  lastLoginAt     DateTime?
+  acceptedTermsAt DateTime?
+  createdAt       DateTime   @default(now())
+  updatedAt       DateTime   @updatedAt
+
+  marketplaceAccounts     MarketplaceAccount[]
+  products                Product[]
+  orders                  Order[]
+  additionalCosts         AdditionalCost[]
+  memberships             OrganizationMembership[]
+  sessions                UserSession[]
+  passwordResetTokens     PasswordResetToken[]
+  emailVerificationTokens EmailVerificationToken[]
+
+  @@index([role, status])
+}
+
+model Organization {
+  id        String   @id @default(uuid())
+  name      String
+  slug      String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  memberships OrganizationMembership[]
+}
+
+model OrganizationMembership {
+  id             String                     @id @default(uuid())
+  organizationId String
+  userId         String
+  role           OrganizationMembershipRole @default(OWNER)
+  createdAt      DateTime                   @default(now())
+  updatedAt      DateTime                   @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, userId])
+  @@index([userId, role])
+}
+
+model UserSession {
+  id               String    @id @default(uuid())
+  userId           String
+  sessionTokenHash String    @unique
+  refreshTokenHash String?   @unique
+  rememberMe       Boolean   @default(false)
+  userAgent        String?
+  ipAddress        String?
+  expiresAt        DateTime
+  lastSeenAt       DateTime?
+  revokedAt        DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, revokedAt])
+  @@index([expiresAt])
+}
+
+model PasswordResetToken {
+  id        String    @id @default(uuid())
+  userId    String
+  tokenHash String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, expiresAt])
+}
+
+model EmailVerificationToken {
+  id         String    @id @default(uuid())
+  userId     String
+  tokenHash  String    @unique
+  expiresAt  DateTime
+  consumedAt DateTime?
+  createdAt  DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, expiresAt])
+}
+
+model MarketplaceAccount {
+  id             String    @id @default(uuid())
+  userId         String
+  marketplace    String
+  accountName    String
+  sellerId       String?
+  accessToken    String?
+  refreshToken   String?
+  tokenExpiresAt DateTime?
+  isActive       Boolean   @default(true)
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  user     User      @relation(fields: [userId], references: [id])
+  products Product[]
+  orders   Order[]
+}
+
+model Product {
+  id                   String   @id @default(uuid())
+  userId               String
+  marketplaceAccountId String?
+  marketplaceProductId String?
+  title                String
+  sku                  String?
+  thumbnail            String?
+  category             String?
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  user               User                @relation(fields: [userId], references: [id])
+  marketplaceAccount MarketplaceAccount? @relation(fields: [marketplaceAccountId], references: [id])
+  cost               ProductCost?
+  orderItems         OrderItem[]
+}
+
+model ProductCost {
+  id         String   @id @default(uuid())
+  productId  String   @unique
+  costPrice  Float
+  extraCost  Float    @default(0)
+  taxPercent Float    @default(0)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  product Product @relation(fields: [productId], references: [id])
+}
+
+model Order {
+  id                   String   @id @default(uuid())
+  userId               String
+  marketplaceAccountId String
+  marketplaceOrderId   String
+  orderNumber          String?
+  status               String
+  buyerName            String?
+  saleDate             DateTime
+  totalAmount          Float
+  marketplaceFee       Float    @default(0)
+  shippingFee          Float    @default(0)
+  discountAmount       Float    @default(0)
+  taxAmount            Float    @default(0)
+  netReceived          Float    @default(0)
+  cancelled            Boolean  @default(false)
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  user               User               @relation(fields: [userId], references: [id])
+  marketplaceAccount MarketplaceAccount @relation(fields: [marketplaceAccountId], references: [id])
+  items              OrderItem[]
+}
+
+model OrderItem {
+  id                String   @id @default(uuid())
+  orderId           String
+  productId         String?
+  marketplaceItemId String?
+  title             String
+  sku               String?
+  quantity          Int
+  unitPrice         Float
+  totalPrice        Float
+  unitCost          Float    @default(0)
+  extraCost         Float    @default(0)
+  taxPercent        Float    @default(0)
+  profit            Float    @default(0)
+  marginPercent     Float    @default(0)
+  roiPercent        Float    @default(0)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  order   Order    @relation(fields: [orderId], references: [id])
+  product Product? @relation(fields: [productId], references: [id])
+}
+
+model AdditionalCost {
+  id             String   @id @default(uuid())
+  userId         String
+  description    String
+  amount         Float
+  referenceMonth String
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id])
+}
+
+model AssistantConversation {
+  id            String   @id @default(uuid())
+  metadata      Json?
+  providerState Json?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  messages AssistantMessage[]
+}
+
+model AssistantMessage {
+  id             String   @id @default(uuid())
+  conversationId String
+  role           String
+  content        String
+  metadata       Json?
+  createdAt      DateTime @default(now())
+
+  conversation AssistantConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId, createdAt])
+}

@@ -1,0 +1,27 @@
+{
+  "name": "backend",
+  "version": "1.0.0",
+  "main": "server.js",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "dev": "node server.js",
+    "start": "node server.js",
+    "test:assistant": "node scripts/assistant-smoke-test.js",
+    "check:env:railway": "node scripts/validate-railway-env.js",
+    "mercadolivre:oauth:url": "node scripts/mercadolivre-oauth-url.js",
+    "deploy:smoke": "node scripts/production-smoke-test.js"
+  },
+  "dependencies": {
+    "@prisma/adapter-pg": "^7.5.0",
+    "@prisma/client": "^7.5.0",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^5.1.0",
+    "pg": "^8.20.0"
+  },
+  "devDependencies": {
+    "prisma": "^7.5.0"
+  }
+}

@@ -1,0 +1,158 @@
+module.exports = [
+  {
+    id: "FDB-1201",
+    type: "complaint",
+    area: "assistant",
+    subject: "Assistente respondeu duas perguntas diferentes com o mesmo texto",
+    message:
+      "Fiz perguntas sobre lucro por pedido e atraso operacional. A assistente repetiu a mesma resposta e isso atrapalhou a leitura do seller.",
+    status: "in_review",
+    priority: "high",
+    sourcePath: "/",
+    createdAt: "2026-03-19T12:18:00.000Z",
+    updatedAt: "2026-03-19T13:04:00.000Z",
+    submittedBy: {
+      name: "Luiz Henrique",
+      email: "luiz@email.com",
+      company: "ViiSync Seller",
+    },
+    history: [
+      {
+        id: "FDB-1201-event-1",
+        status: "new",
+        note: "Feedback enviado pelo seller a partir da area da assistente.",
+        actorType: "seller",
+        createdAt: "2026-03-19T12:18:00.000Z",
+      },
+      {
+        id: "FDB-1201-event-2",
+        status: "in_review",
+        note: "Time de produto abriu analise do fluxo conversacional.",
+        actorType: "admin",
+        createdAt: "2026-03-19T13:04:00.000Z",
+      },
+    ],
+  },
+  {
+    id: "FDB-1198",
+    type: "feature",
+    area: "products",
+    subject: "Quero filtro por margem minima na tela de produtos",
+    message:
+      "Hoje consigo filtrar por status, mas faria sentido ter um recorte rapido para mostrar produtos com margem abaixo de 20 por cento.",
+    status: "new",
+    priority: "medium",
+    sourcePath: "/produtos",
+    createdAt: "2026-03-19T10:12:00.000Z",
+    updatedAt: "2026-03-19T10:12:00.000Z",
+    submittedBy: {
+      name: "Luiz Henrique",
+      email: "luiz@email.com",
+      company: "ViiSync Seller",
+    },
+    history: [
+      {
+        id: "FDB-1198-event-1",
+        status: "new",
+        note: "Sugestao de melhoria criada pelo seller.",
+        actorType: "seller",
+        createdAt: "2026-03-19T10:12:00.000Z",
+      },
+    ],
+  },
+  {
+    id: "FDB-1194",
+    type: "bug",
+    area: "mercado-livre",
+    subject: "Inbox de perguntas do Mercado Livre nao atualiza sozinha",
+    message:
+      "Mesmo clicando em atualizar, alguns anuncios seguem sem novas perguntas. Seria importante ter refresh automatico ou aviso de desatualizacao.",
+    status: "new",
+    priority: "high",
+    sourcePath: "/mercado-livre/perguntas",
+    createdAt: "2026-03-19T09:04:00.000Z",
+    updatedAt: "2026-03-19T09:04:00.000Z",
+    submittedBy: {
+      name: "Ana Paula",
+      email: "ana@atlas.com",
+      company: "Loja Atlas",
+    },
+    history: [
+      {
+        id: "FDB-1194-event-1",
+        status: "new",
+        note: "Bug reportado pelo seller na central de suporte.",
+        actorType: "seller",
+        createdAt: "2026-03-19T09:04:00.000Z",
+      },
+    ],
+  },
+  {
+    id: "FDB-1189",
+    type: "complaint",
+    area: "onboarding",
+    subject: "Cadastro inicial confuso para equipes pequenas",
+    message:
+      "Nao ficou claro se devo cadastrar a conta primeiro ou conectar o marketplace. O fluxo parece bom visualmente, mas ainda esta pouco guiado.",
+    status: "in_review",
+    priority: "medium",
+    sourcePath: "/cadastro",
+    createdAt: "2026-03-18T17:24:00.000Z",
+    updatedAt: "2026-03-18T19:02:00.000Z",
+    submittedBy: {
+      name: "Camila Rocha",
+      email: "camila@casaprime.com",
+      company: "Casa Prime Seller",
+    },
+    history: [
+      {
+        id: "FDB-1189-event-1",
+        status: "new",
+        note: "Reclamacao aberta pelo seller durante onboarding.",
+        actorType: "seller",
+        createdAt: "2026-03-18T17:24:00.000Z",
+      },
+      {
+        id: "FDB-1189-event-2",
+        status: "in_review",
+        note: "UX mapeando pontos de friccao no primeiro acesso.",
+        actorType: "admin",
+        createdAt: "2026-03-18T19:02:00.000Z",
+      },
+    ],
+  },
+  {
+    id: "FDB-1184",
+    type: "feedback",
+    area: "dashboard",
+    subject: "Dashboard ficou mais claro depois da reorganizacao dos cards",
+    message:
+      "A leitura do faturamento e do lucro ficou melhor. Seria bom manter esse padrao tambem nas proximas paginas operacionais.",
+    status: "resolved",
+    priority: "low",
+    sourcePath: "/",
+    createdAt: "2026-03-18T11:10:00.000Z",
+    updatedAt: "2026-03-18T15:48:00.000Z",
+    submittedBy: {
+      name: "Bruno Tavares",
+      email: "bruno@setupfast.com",
+      company: "Setup Fast",
+    },
+    history: [
+      {
+        id: "FDB-1184-event-1",
+        status: "new",
+        note: "Feedback positivo enviado pelo seller.",
+        actorType: "seller",
+        createdAt: "2026-03-18T11:10:00.000Z",
+      },
+      {
+        id: "FDB-1184-event-2",
+        status: "resolved",
+        note: "Time registrou o padrao visual como referencia para novas telas.",
+        actorType: "admin",
+        createdAt: "2026-03-18T15:48:00.000Z",
+      },
+    ],
+  },
+];

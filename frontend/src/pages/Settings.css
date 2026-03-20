@@ -1,0 +1,226 @@
+.settings-page {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.settings-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+
+.settings-card {
+  position: relative;
+  overflow: hidden;
+  background: var(--panel-surface);
+  backdrop-filter: blur(14px);
+  border-radius: 24px;
+  padding: 24px;
+  border: 1px solid var(--card-border);
+  box-shadow: var(--card-shadow), var(--surface-shadow-inset);
+}
+
+.settings-card::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: var(--panel-sheen);
+  pointer-events: none;
+}
+
+.settings-card::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: var(--section-glow);
+  pointer-events: none;
+}
+
+.settings-card > * {
+  position: relative;
+  z-index: 1;
+}
+
+.settings-card h2 {
+  margin: 0 0 18px;
+  font-size: 24px;
+  letter-spacing: -0.03em;
+  color: var(--text-strong);
+}
+
+.settings-field {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.settings-field label {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-muted);
+}
+
+.settings-field input,
+.settings-field select {
+  border: 1px solid var(--input-border);
+  background: var(--input-bg);
+  border-radius: 14px;
+  padding: 14px 16px;
+  color: var(--text);
+  box-shadow: var(--button-secondary-shadow);
+}
+
+.settings-field input::placeholder {
+  color: var(--input-placeholder);
+}
+
+.settings-info-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 0;
+  border-bottom: 1px solid var(--row-border);
+}
+
+.settings-info-row:last-of-type {
+  margin-bottom: 16px;
+}
+
+.settings-info-row span {
+  color: var(--text-muted);
+}
+
+.settings-info-row strong {
+  color: var(--text-strong);
+}
+
+.settings-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.settings-actions-single button {
+  flex: 0 0 auto;
+}
+
+.settings-actions button {
+  flex: 1;
+  min-height: 48px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  font-weight: 800;
+  cursor: pointer;
+  transition:
+    transform 0.2s ease,
+    background-color 0.2s ease,
+    border-color 0.2s ease,
+    box-shadow 0.2s ease;
+}
+
+.settings-actions button:hover {
+  transform: translateY(-1px);
+}
+
+.settings-actions .primary {
+  border: 1px solid transparent;
+  background: linear-gradient(135deg, var(--accent-strong) 0%, var(--accent) 100%);
+  color: #ffffff;
+  box-shadow: var(--button-primary-shadow);
+}
+
+.settings-actions .primary:hover {
+  box-shadow: var(--button-primary-shadow-hover);
+}
+
+.settings-actions .secondary {
+  border: 1px solid var(--input-border);
+  background: var(--panel-surface-inset);
+  color: var(--text-strong);
+  box-shadow: var(--button-secondary-shadow);
+}
+
+.settings-actions .secondary:hover {
+  background: var(--surface-4);
+  box-shadow: var(--interactive-shadow-hover);
+}
+
+.settings-muted {
+  color: var(--text-muted);
+  margin: 0 0 18px;
+  line-height: 1.6;
+}
+
+.settings-inline-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  margin-bottom: 14px;
+  padding: 0 14px;
+  border-radius: 14px;
+  border: 1px solid var(--input-border);
+  background: var(--panel-surface-inset);
+  color: var(--text-strong);
+  font-weight: 700;
+  text-decoration: none;
+  box-shadow: var(--button-secondary-shadow);
+}
+
+.settings-inline-link:hover {
+  background: var(--surface-4);
+  box-shadow: var(--interactive-shadow-hover);
+}
+
+.settings-placeholder {
+  border: 1px solid var(--border-strong);
+  background: var(--panel-surface-inset);
+  border-radius: 16px;
+  padding: 16px;
+  margin-bottom: 12px;
+  box-shadow: var(--button-secondary-shadow);
+}
+
+.settings-placeholder strong {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--text-strong);
+}
+
+.settings-placeholder p {
+  margin: 0;
+  color: var(--text-muted);
+}
+
+.settings-success {
+  background: var(--success-soft);
+  color: var(--success);
+  border: 1px solid var(--success-border);
+  padding: 14px 16px;
+  border-radius: 16px;
+  font-weight: 700;
+  box-shadow: var(--button-secondary-shadow);
+}
+
+@media (max-width: 900px) {
+  .settings-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 640px) {
+  .settings-card {
+    padding: 20px;
+  }
+
+  .settings-info-row {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .settings-actions {
+    flex-direction: column;
+  }
+}

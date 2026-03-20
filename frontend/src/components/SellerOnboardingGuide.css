@@ -1,0 +1,233 @@
+.seller-onboarding-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(2, 6, 23, 0.52);
+  backdrop-filter: blur(8px);
+}
+
+.seller-onboarding-prompt,
+.seller-tour-card {
+  border: 1px solid var(--border-strong);
+  background: var(--panel-surface-strong);
+  box-shadow: var(--card-shadow-strong), var(--surface-shadow-inset);
+}
+
+.seller-onboarding-prompt {
+  width: min(560px, 100%);
+  padding: 28px;
+  border-radius: 28px;
+}
+
+.seller-onboarding-tag,
+.seller-tour-tag,
+.seller-onboarding-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 32px;
+  padding: 0 12px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.seller-onboarding-tag,
+.seller-tour-tag {
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+}
+
+.seller-onboarding-prompt h2,
+.seller-tour-copy h3 {
+  margin: 16px 0 0;
+  color: var(--text-strong);
+}
+
+.seller-onboarding-prompt p,
+.seller-tour-copy p {
+  margin: 14px 0 0;
+  color: var(--text);
+  line-height: 1.7;
+}
+
+.seller-onboarding-preview {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 20px;
+}
+
+.seller-onboarding-chip {
+  background: var(--surface-inset);
+  border: 1px solid var(--border-strong);
+  color: var(--text-muted);
+}
+
+.seller-onboarding-actions,
+.seller-tour-actions {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-top: 24px;
+}
+
+.seller-onboarding-primary,
+.seller-onboarding-secondary,
+.seller-tour-primary,
+.seller-tour-secondary,
+.seller-tour-close {
+  min-height: 46px;
+  padding: 0 18px;
+  border-radius: 14px;
+  font: inherit;
+  font-weight: 800;
+  cursor: pointer;
+  transition:
+    transform 0.18s ease,
+    border-color 0.18s ease,
+    box-shadow 0.18s ease,
+    background-color 0.18s ease,
+    color 0.18s ease;
+}
+
+.seller-onboarding-primary,
+.seller-tour-primary {
+  border: 1px solid transparent;
+  background: linear-gradient(135deg, var(--accent-strong) 0%, var(--accent) 100%);
+  color: #ffffff;
+  box-shadow: var(--button-primary-shadow);
+}
+
+.seller-onboarding-secondary,
+.seller-tour-secondary,
+.seller-tour-close {
+  border: 1px solid var(--border-strong);
+  background: var(--panel-surface-inset);
+  color: var(--text-strong);
+  box-shadow: var(--button-secondary-shadow);
+}
+
+.seller-onboarding-primary:hover,
+.seller-tour-primary:hover,
+.seller-onboarding-secondary:hover,
+.seller-tour-secondary:hover,
+.seller-tour-close:hover {
+  transform: translateY(-1px);
+}
+
+.seller-tour-card {
+  position: fixed;
+  left: calc(var(--app-sidebar-width) + 24px);
+  bottom: 24px;
+  z-index: 43;
+  width: min(420px, calc(100vw - var(--app-sidebar-width) - 48px));
+  padding: 20px;
+  border-radius: 24px;
+}
+
+.seller-tour-topline {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.seller-tour-close {
+  min-height: 36px;
+  padding: 0 12px;
+}
+
+.seller-tour-progress {
+  height: 8px;
+  margin-top: 16px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--surface-inset);
+  border: 1px solid var(--border-muted);
+}
+
+.seller-tour-progress-fill {
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(135deg, var(--accent-strong) 0%, var(--accent) 100%);
+}
+
+.seller-tour-step {
+  display: inline-block;
+  margin-top: 16px;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.seller-tour-highlights {
+  display: grid;
+  gap: 10px;
+  margin-top: 18px;
+}
+
+.seller-tour-highlight {
+  padding: 14px 16px;
+  border-radius: 18px;
+  border: 1px solid var(--border-muted);
+  background: var(--surface-inset);
+  color: var(--text);
+  line-height: 1.6;
+}
+
+.seller-tour-secondary:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none;
+}
+
+@media (max-width: 920px) {
+  .seller-tour-card {
+    left: 16px;
+    right: 16px;
+    bottom: 80px;
+    width: auto;
+  }
+}
+
+@media (max-width: 640px) {
+  .seller-onboarding-overlay {
+    padding: 16px;
+  }
+
+  .seller-onboarding-prompt,
+  .seller-tour-card {
+    padding: 20px;
+    border-radius: 22px;
+  }
+
+  .seller-onboarding-actions,
+  .seller-tour-actions {
+    flex-direction: column;
+  }
+
+  .seller-onboarding-primary,
+  .seller-onboarding-secondary,
+  .seller-tour-primary,
+  .seller-tour-secondary {
+    width: 100%;
+  }
+
+  .seller-tour-card {
+    bottom: 76px;
+  }
+
+  .seller-tour-topline {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}
