@@ -11,7 +11,7 @@ RUN npm ci
 COPY . .
 
 # Generate Prisma client with the real schema in place.
-RUN npx prisma generate
+RUN DATABASE_URL="postgresql://postgres:postgres@localhost:5432/postgres" npx prisma generate
 
 EXPOSE 3001
 
