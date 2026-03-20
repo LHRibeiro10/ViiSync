@@ -29,6 +29,7 @@ const {
 
 const app = express();
 const PORT = process.env.PORT || 3001;
+const HOST = process.env.HOST || "0.0.0.0";
 
 app.use(cors());
 app.use(express.json());
@@ -131,6 +132,11 @@ app.get(
 app.use("/integrations/mercadolivre", mercadolivreQuestionsRoutes);
 app.post("/webhooks/mercadolivre", handleMercadoLivreWebhook);
 
-app.listen(PORT, () => {
-  console.log(`Servidor rodando em http://localhost:${PORT}`);
+const server = app.listen(PORT, HOST, () => {
+  console.log(`Servidor rodando em http://${HOST}:${PORT}`);
+});
+
+server.on("error", (error) => {
+  console.error("[server.listen:error]", error);
+  process.exit(1);
 });
