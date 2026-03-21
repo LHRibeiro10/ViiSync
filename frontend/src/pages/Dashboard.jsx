@@ -1,13 +1,18 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { getChartData, getDashboard, getProfitTable } from "../services/api";
+import {
+  getChartData,
+  getDashboard,
+  getProfitTable,
+  syncMercadoLivreAll,
+} from "../services/api";
 import PageHeader from "../components/PageHeader";
 import SummaryCard from "../components/SummaryCard";
 import Panel from "../components/Panel";
 import ChartPanel from "../components/ChartPanel";
 import ProfitTable from "../components/ProfitTable";
 import TaxCalculatorModal from "../components/TaxCalculatorModal";
-import { useAnalyticsPeriod } from "../contexts/AnalyticsPeriodContext";
+import { useAnalyticsPeriod } from "../contexts/useAnalyticsPeriod";
 import "./Dashboard.css";
 
 const currencyFormatter = new Intl.NumberFormat("pt-BR", {
@@ -105,7 +110,7 @@ function Dashboard() {
             }
           }, PERIOD_SWITCH_ENTER_MS);
         }
-      } catch (err) {
+      } catch {
         if (isCancelled || latestPeriodRequestRef.current !== requestId) {
           return;
         }
@@ -116,14 +121,12 @@ function Dashboard() {
           setPeriodTransitionStage("");
         }
       } finally {
-        if (isCancelled || latestPeriodRequestRef.current !== requestId) {
-          return;
-        }
-
-        if (isInitialLoad) {
-          setLoading(false);
-        } else {
-          setIsPeriodRefreshing(false);
+        if (!isCancelled && latestPeriodRequestRef.current === requestId) {
+          if (isInitialLoad) {
+            setLoading(false);
+          } else {
+            setIsPeriodRefreshing(false);
+          }
         }
       }
     }
@@ -147,7 +150,23 @@ function Dashboard() {
   async function handleSync() {
     try {
       setSyncing(true);
-      await new Promise((resolve) => setTimeout(resolve, 1200));
+      setError("");
+
+      await syncMercadoLivreAll({
+        period: selectedPeriod,
+      });
+
+      const [dashboardResult, chartResult, profitResult] = await Promise.all([
+        getDashboard(selectedPeriod),
+        getChartData(selectedPeriod),
+        getProfitTable(selectedPeriod),
+      ]);
+
+      setData(dashboardResult);
+      setChartData(chartResult);
+      setProfitRows(profitResult);
+    } catch (error) {
+      setError(error.message || "Nao foi possivel sincronizar os dados do Mercado Livre.");
     } finally {
       setSyncing(false);
     }

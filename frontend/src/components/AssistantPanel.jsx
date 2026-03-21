@@ -1,18 +1,25 @@
-import { startTransition, useEffect, useMemo, useRef, useState } from "react";
+import {
+  startTransition,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
   createAssistantConversation,
   getAssistantConversation,
   resetAssistantConversation,
   sendAssistantMessage,
 } from "../services/api";
-import { useAnalyticsPeriod } from "../contexts/AnalyticsPeriodContext";
+import { useAnalyticsPeriod } from "../contexts/useAnalyticsPeriod";
 import "./AssistantPanel.css";
 
 const STORAGE_KEY = "viisync-assistant-conversation";
 const MIN_RESPONSE_WAIT_MS = 520;
 const THINKING_STEPS = [
   "Lendo sua pergunta",
-  "Analisando os dados mockados",
+  "Analisando os dados operacionais",
   "Montando uma resposta objetiva",
 ];
 
@@ -127,6 +134,77 @@ function AssistantPanel({ currentPathname }) {
   const streamTokenRef = useRef(0);
   const refreshTokenRef = useRef(0);
 
+  const initializeAssistant = useCallback(async () => {
+    setLoading(true);
+    setError("");
+
+    try {
+      const storedConversationId = window.localStorage.getItem(STORAGE_KEY);
+
+      if (storedConversationId) {
+        try {
+          const existingConversation = await getAssistantConversation(
+            storedConversationId,
+            currentPathname,
+            selectedPeriod
+          );
+          syncPayloadMeta(existingConversation);
+          applyMessages(existingConversation.messages || []);
+          return existingConversation;
+        } catch {
+          window.localStorage.removeItem(STORAGE_KEY);
+        }
+      }
+
+      const newConversation = await createAssistantConversation(
+        currentPathname,
+        selectedPeriod
+      );
+      syncPayloadMeta(newConversation);
+      applyMessages(newConversation.messages || []);
+      return newConversation;
+    } catch {
+      setError("Nao foi possivel iniciar a assistente.");
+      return null;
+    } finally {
+      setLoading(false);
+    }
+  }, [currentPathname, selectedPeriod]);
+
+  const refreshConversationContext = useCallback(async () => {
+    const requestToken = refreshTokenRef.current + 1;
+    refreshTokenRef.current = requestToken;
+
+    try {
+      if (!conversationId) {
+        return;
+      }
+
+      const payload = await getAssistantConversation(
+        conversationId,
+        currentPathname,
+        selectedPeriod
+      );
+
+      if (requestToken !== refreshTokenRef.current) {
+        return;
+      }
+
+      syncPayloadMeta(payload);
+      applyMessages(payload.messages || []);
+    } catch (err) {
+      if (requestToken !== refreshTokenRef.current) {
+        return;
+      }
+
+      if (err?.status === 404) {
+        window.localStorage.removeItem(STORAGE_KEY);
+        setConversationId("");
+        await initializeAssistant();
+      }
+    }
+  }, [conversationId, currentPathname, initializeAssistant, selectedPeriod]);
+
   useEffect(() => {
     currentMessagesRef.current = messages;
   }, [messages]);
@@ -138,7 +216,7 @@ function AssistantPanel({ currentPathname }) {
 
     initializedRef.current = true;
     initializeAssistant();
-  }, []);
+  }, [initializeAssistant]);
 
   useEffect(() => {
     if (!initializedRef.current || sending) {
@@ -146,7 +224,7 @@ function AssistantPanel({ currentPathname }) {
     }
 
     refreshConversationContext();
-  }, [currentPathname, selectedPeriod]);
+  }, [currentPathname, refreshConversationContext, selectedPeriod, sending]);
 
   useEffect(() => {
     if (!isOpen) {
@@ -185,43 +263,6 @@ function AssistantPanel({ currentPathname }) {
 
   const hasUserMessages = messages.some((message) => message.role === "user");
 
-  async function initializeAssistant() {
-    setLoading(true);
-    setError("");
-
-    try {
-      const storedConversationId = window.localStorage.getItem(STORAGE_KEY);
-
-      if (storedConversationId) {
-        try {
-          const existingConversation = await getAssistantConversation(
-            storedConversationId,
-            currentPathname,
-            selectedPeriod
-          );
-          syncPayloadMeta(existingConversation);
-          applyMessages(existingConversation.messages || []);
-          return existingConversation;
-        } catch {
-          window.localStorage.removeItem(STORAGE_KEY);
-        }
-      }
-
-      const newConversation = await createAssistantConversation(
-        currentPathname,
-        selectedPeriod
-      );
-      syncPayloadMeta(newConversation);
-      applyMessages(newConversation.messages || []);
-      return newConversation;
-    } catch {
-      setError("Nao foi possivel iniciar a assistente.");
-      return null;
-    } finally {
-      setLoading(false);
-    }
-  }
-
   function syncPayloadMeta(payload) {
     setConversationId(payload.conversation.id);
     setSuggestions(Array.isArray(payload.suggestions) ? payload.suggestions : []);
@@ -246,40 +287,6 @@ function AssistantPanel({ currentPathname }) {
     syncPayloadMeta(payload);
     applyMessages(payload.messages || []);
     return payload.conversation.id;
-  }
-
-  async function refreshConversationContext() {
-    const requestToken = refreshTokenRef.current + 1;
-    refreshTokenRef.current = requestToken;
-
-    try {
-      if (!conversationId) {
-        return;
-      }
-
-      const payload = await getAssistantConversation(
-        conversationId,
-        currentPathname,
-        selectedPeriod
-      );
-
-      if (requestToken !== refreshTokenRef.current) {
-        return;
-      }
-
-      syncPayloadMeta(payload);
-      applyMessages(payload.messages || []);
-    } catch (err) {
-      if (requestToken !== refreshTokenRef.current) {
-        return;
-      }
-
-      if (err?.status === 404) {
-        window.localStorage.removeItem(STORAGE_KEY);
-        setConversationId("");
-        await initializeAssistant();
-      }
-    }
   }
 
   function startThinkingLoop() {
@@ -466,7 +473,7 @@ function AssistantPanel({ currentPathname }) {
           <header className="assistant-header">
             <div className="assistant-header-copy">
               <div className="assistant-header-topline">
-                <span className="assistant-eyebrow">Dados mockados</span>
+                <span className="assistant-eyebrow">Dados operacionais</span>
                 <span className="assistant-view-pill">
                   {currentPathname === "/" ? "Dashboard" : currentPathname.replace("/", "")}
                 </span>

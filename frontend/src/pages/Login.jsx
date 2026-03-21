@@ -1,9 +1,12 @@
 import { useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
-import { loginUser, setSessionToken } from "../services/api";
+import { Link, useLocation, useNavigate } from "react-router-dom";
+import { loginUser } from "../services/api";
+import { useAuthSession } from "../contexts/useAuthSession";
 
 function Login() {
   const navigate = useNavigate();
+  const location = useLocation();
+  const { applySessionToken } = useAuthSession();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [rememberMe, setRememberMe] = useState(true);
@@ -38,14 +41,16 @@ function Login() {
         throw new Error("Sessao nao recebida do backend.");
       }
 
-      setSessionToken(token);
+      const sessionUser = await applySessionToken(token);
       setFeedback({
         tone: "success",
         message: "Login realizado com sucesso. Redirecionando...",
       });
 
       window.setTimeout(() => {
-        navigate("/");
+        const fromPath = location.state?.from;
+        const isAdmin = String(sessionUser?.role || "").toUpperCase() === "ADMIN";
+        navigate(fromPath || (isAdmin ? "/admin" : "/"), { replace: true });
       }, 350);
     } catch (error) {
       setFeedback({

@@ -1,63 +1,125 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import PageHeader from "../components/PageHeader";
 import {
+  disconnectMercadoLivreIntegration,
   getIntegrationsHub,
-  getMercadoLivreAuthorizationStartUrl,
+  getMercadoLivreAuthorizationUrl,
   getMercadoLivreIntegrationStatus,
+  refreshMercadoLivreIntegrationToken,
+  syncMercadoLivreAll,
 } from "../services/api";
 import { formatDateTime } from "../utils/presentation";
 import "./IntegrationsHub.css";
 
-function IntegrationsHub() {
+function IntegrationsHub({ embedded = false }) {
+  const navigate = useNavigate();
   const [payload, setPayload] = useState(null);
   const [mercadoLivreStatus, setMercadoLivreStatus] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [actionMessage, setActionMessage] = useState("");
+  const [actionLoading, setActionLoading] = useState(false);
 
-  useEffect(() => {
-    let isCancelled = false;
+  const loadIntegrationHub = useCallback(async () => {
+    try {
+      setError("");
+      setLoading(true);
 
-    async function loadIntegrationHub() {
-      try {
-        setError("");
-        setLoading(true);
-        const [response, statusResponse] = await Promise.all([
-          getIntegrationsHub(),
-          getMercadoLivreIntegrationStatus().catch(() => null),
-        ]);
+      const [response, statusResponse] = await Promise.all([
+        getIntegrationsHub(),
+        getMercadoLivreIntegrationStatus().catch(() => null),
+      ]);
 
-        if (!isCancelled) {
-          setPayload(response);
-          setMercadoLivreStatus(statusResponse);
-        }
-      } catch (err) {
-        if (!isCancelled) {
-          setError("Nao foi possivel carregar o hub de integracoes.");
-        }
-      } finally {
-        if (!isCancelled) {
-          setLoading(false);
-        }
-      }
+      setPayload(response);
+      setMercadoLivreStatus(statusResponse);
+    } catch (loadError) {
+      setError(
+        loadError?.message || "Nao foi possivel carregar o hub de integracoes."
+      );
+    } finally {
+      setLoading(false);
     }
-
-    loadIntegrationHub();
-
-    return () => {
-      isCancelled = true;
-    };
   }, []);
 
-  function triggerMockAction(message) {
+  useEffect(() => {
+    loadIntegrationHub();
+  }, [loadIntegrationHub]);
+
+  function showActionMessage(message) {
     setActionMessage(message);
-    window.setTimeout(() => setActionMessage(""), 2200);
+    window.setTimeout(() => setActionMessage(""), 2600);
   }
 
-  function handleMercadoLivreReconnect(accountName) {
-    const authorizationStartUrl = getMercadoLivreAuthorizationStartUrl({ accountName });
-    window.open(authorizationStartUrl, "_blank", "noopener,noreferrer");
-    triggerMockAction("Fluxo OAuth do Mercado Livre aberto em nova aba.");
+  async function handleMercadoLivreReconnect(accountName) {
+    try {
+      const authorizationPayload = await getMercadoLivreAuthorizationUrl({
+        accountName,
+      });
+
+      if (!authorizationPayload?.authorizationUrl) {
+        throw new Error("Nao foi possivel obter a URL de autorizacao do Mercado Livre.");
+      }
+
+      window.open(authorizationPayload.authorizationUrl, "_blank", "noopener,noreferrer");
+      showActionMessage(
+        "Fluxo OAuth do Mercado Livre aberto. Conclua a autorizacao e atualize esta tela."
+      );
+    } catch (actionError) {
+      showActionMessage(
+        actionError.message || "Nao foi possivel iniciar a autorizacao do Mercado Livre."
+      );
+    }
+  }
+
+  async function runAction(task, successMessage) {
+    try {
+      setActionLoading(true);
+      await task();
+      showActionMessage(successMessage);
+      await loadIntegrationHub();
+    } catch (actionError) {
+      showActionMessage(actionError.message || "Nao foi possivel concluir a operacao.");
+    } finally {
+      setActionLoading(false);
+    }
+  }
+
+  async function handleSyncAll() {
+    await runAction(
+      () => syncMercadoLivreAll({}),
+      "Sincronizacao completa do Mercado Livre concluida."
+    );
+  }
+
+  async function handleRefreshToken() {
+    await runAction(
+      () => refreshMercadoLivreIntegrationToken(),
+      "Token Mercado Livre renovado com sucesso."
+    );
+  }
+
+  async function handleDisconnect() {
+    await runAction(
+      () => disconnectMercadoLivreIntegration(),
+      "Conta Mercado Livre desconectada com sucesso."
+    );
+  }
+
+  function handleActionFromQueue(action) {
+    const cta = String(action?.cta || "").toLowerCase();
+
+    if (cta.includes("conectar") || cta.includes("reconectar")) {
+      handleMercadoLivreReconnect("Conta Mercado Livre");
+      return;
+    }
+
+    if (cta.includes("perguntas")) {
+      navigate("/mercado-livre/perguntas");
+      return;
+    }
+
+    handleSyncAll();
   }
 
   if (loading && !payload) {
@@ -65,12 +127,14 @@ function IntegrationsHub() {
   }
 
   return (
-    <div className="integrations-page">
-      <PageHeader
-        tag="Integracoes"
-        title="Hub de integracoes"
-        description="Status das contas, sincronizacoes, erros, tokens e proximas acoes para manter a operacao conectada."
-      />
+    <div className={`integrations-page ${embedded ? "is-embedded" : ""}`}>
+      {embedded ? null : (
+        <PageHeader
+          tag="Integracoes"
+          title="Hub de integracoes"
+          description="Conecte e monitore sua conta Mercado Livre para manter sincronizacao operacional."
+        />
+      )}
 
       {error ? <div className="integrations-inline-alert">{error}</div> : null}
       {actionMessage ? <div className="integrations-inline-success">{actionMessage}</div> : null}
@@ -80,7 +144,7 @@ function IntegrationsHub() {
         </div>
       ) : mercadoLivreStatus ? (
         <div className="integrations-inline-alert">
-          Mercado Livre em modo mock. Conecte via OAuth para usar API real.
+          Conta Mercado Livre sem credencial live ativa. Conecte via OAuth para sincronizar.
         </div>
       ) : null}
 
@@ -103,70 +167,99 @@ function IntegrationsHub() {
           </div>
 
           <div className="integrations-account-list">
-            {(payload?.accounts || []).map((account) => (
-              <article key={account.id} className="integrations-account-card">
+            {(payload?.accounts || []).length ? (
+              (payload?.accounts || []).map((account) => (
+                <article key={account.id} className="integrations-account-card">
+                  <div className="integrations-account-top">
+                    <div>
+                      <strong>{account.name}</strong>
+                      <p>{account.marketplace}</p>
+                    </div>
+                    <span
+                      className={`integrations-badge is-${
+                        account.reconnectRecommended ? "warning" : "success"
+                      }`}
+                    >
+                      {account.status}
+                    </span>
+                  </div>
+
+                  <div className="integrations-account-grid">
+                    <div>
+                      <span>Ultima sync</span>
+                      <strong>{formatDateTime(account.lastSyncAt)}</strong>
+                    </div>
+                    <div>
+                      <span>Latencia</span>
+                      <strong>{account.latency}</strong>
+                    </div>
+                    <div>
+                      <span>Fila</span>
+                      <strong>{account.queueBacklog} evento(s)</strong>
+                    </div>
+                    <div>
+                      <span>Token</span>
+                      <strong>{account.tokenStatus}</strong>
+                    </div>
+                  </div>
+
+                  <p>{account.note}</p>
+
+                  <div className="integrations-account-actions">
+                    <button
+                      type="button"
+                      className="integrations-primary-button"
+                      onClick={() => handleMercadoLivreReconnect(account.name)}
+                      disabled={actionLoading}
+                    >
+                      {account.reconnectRecommended ? "Reconectar" : "Renovar autorizacao"}
+                    </button>
+                    <button
+                      type="button"
+                      className="integrations-secondary-button"
+                      onClick={handleSyncAll}
+                      disabled={actionLoading}
+                    >
+                      {actionLoading ? "Processando..." : "Sincronizar agora"}
+                    </button>
+                    <button
+                      type="button"
+                      className="integrations-text-button"
+                      onClick={handleDisconnect}
+                      disabled={actionLoading}
+                    >
+                      Desconectar conta
+                    </button>
+                  </div>
+                </article>
+              ))
+            ) : (
+              <article className="integrations-account-card">
                 <div className="integrations-account-top">
                   <div>
-                    <strong>{account.name}</strong>
-                    <p>{account.marketplace}</p>
+                    <strong>Nenhuma conta conectada</strong>
+                    <p>Mercado Livre</p>
                   </div>
-                  <span className={`integrations-badge is-${account.reconnectRecommended ? "warning" : "success"}`}>
-                    {account.status}
-                  </span>
+                  <span className="integrations-badge is-warning">Pendente</span>
                 </div>
 
-                <div className="integrations-account-grid">
-                  <div>
-                    <span>Ultima sync</span>
-                    <strong>{formatDateTime(account.lastSyncAt)}</strong>
-                  </div>
-                  <div>
-                    <span>Latencia</span>
-                    <strong>{account.latency}</strong>
-                  </div>
-                  <div>
-                    <span>Fila</span>
-                    <strong>{account.queueBacklog} evento(s)</strong>
-                  </div>
-                  <div>
-                    <span>Token</span>
-                    <strong>{account.tokenStatus}</strong>
-                  </div>
-                </div>
-
-                <p>{account.note}</p>
+                <p>
+                  Conecte sua conta do Mercado Livre para sincronizar perguntas, pedidos,
+                  produtos e relatorios por canal.
+                </p>
 
                 <div className="integrations-account-actions">
                   <button
                     type="button"
                     className="integrations-primary-button"
-                    onClick={() => {
-                      const isMercadoLivre = String(account.marketplace || "")
-                        .toLowerCase()
-                        .includes("mercado livre");
-
-                      if (isMercadoLivre) {
-                        handleMercadoLivreReconnect(account.name);
-                        return;
-                      }
-
-                      triggerMockAction(`Acao simulada para ${account.name}: revisar reconexao.`);
-                    }}
+                    onClick={() => handleMercadoLivreReconnect("Conta principal ML")}
+                    disabled={actionLoading}
                   >
-                    {account.reconnectRecommended ? "Reconectar" : "Sincronizar"}
-                  </button>
-                  <button
-                    type="button"
-                    className="integrations-secondary-button"
-                    onClick={() =>
-                      triggerMockAction(`Abrindo log mockado da conta ${account.name}.`)
-                    }
-                  >
-                    Ver logs
+                    Conectar conta Mercado Livre
                   </button>
                 </div>
               </article>
-            ))}
+            )}
           </div>
         </section>
 
@@ -177,6 +270,14 @@ function IntegrationsHub() {
                 <h2>Eventos recentes</h2>
                 <p>Leituras operacionais do pipeline de integracao.</p>
               </div>
+              <button
+                type="button"
+                className="integrations-text-button"
+                onClick={handleRefreshToken}
+                disabled={actionLoading}
+              >
+                Renovar token
+              </button>
             </div>
 
             <div className="integrations-side-list">
@@ -206,7 +307,8 @@ function IntegrationsHub() {
                   <button
                     type="button"
                     className="integrations-text-button"
-                    onClick={() => triggerMockAction(`${action.cta} mockado com sucesso.`)}
+                    onClick={() => handleActionFromQueue(action)}
+                    disabled={actionLoading}
                   >
                     {action.cta}
                   </button>

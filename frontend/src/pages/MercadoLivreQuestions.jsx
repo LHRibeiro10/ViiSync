@@ -324,7 +324,7 @@ function MercadoLivreQuestions() {
       id: "answered",
       label: "Respondidas",
       value: overview.answered,
-      description: `${formatResponseRate(overview.responseRate)} da fila tratada no mock.`,
+      description: `${formatResponseRate(overview.responseRate)} da fila tratada no canal.`,
       tone: "success",
     },
     {

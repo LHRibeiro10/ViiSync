@@ -32,9 +32,7 @@ function AuthLayout() {
       <section className="auth-hero">
         <div className="auth-hero-topline">
           <span className="auth-hero-pill">Acesso ViiSync</span>
-          <NavLink to="/admin" className="auth-hero-link">
-            Ver backoffice demo
-          </NavLink>
+          <span className="auth-hero-link">Ambiente seguro</span>
         </div>
 
         <div className="auth-hero-logo-box">

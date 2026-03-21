@@ -1,0 +1,66 @@
+.user-center-page {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.user-center-tabs {
+  display: grid;
+  gap: 14px;
+  padding: 18px;
+  border-radius: 20px;
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  background: rgba(255, 255, 255, 0.94);
+  box-shadow: 0 20px 36px rgba(15, 23, 42, 0.08);
+}
+
+.user-center-tab-list {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.user-center-tab-button {
+  min-height: 44px;
+  padding: 0 16px;
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  border-radius: 12px;
+  background: rgba(248, 250, 252, 0.92);
+  color: #334155;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  transition:
+    transform 0.16s ease,
+    border-color 0.16s ease,
+    box-shadow 0.16s ease;
+}
+
+.user-center-tab-button:hover {
+  transform: translateY(-1px);
+  border-color: rgba(37, 99, 235, 0.34);
+}
+
+.user-center-tab-button.is-active {
+  border-color: rgba(29, 78, 216, 0.4);
+  background: linear-gradient(135deg, rgba(37, 99, 235, 0.14), rgba(59, 130, 246, 0.14));
+  color: #1d4ed8;
+  box-shadow: 0 12px 22px rgba(37, 99, 235, 0.15);
+}
+
+.user-center-tab-copy h2 {
+  margin: 0;
+  color: #0f172a;
+  font-size: 20px;
+}
+
+.user-center-tab-copy p {
+  margin: 8px 0 0;
+  color: #64748b;
+  line-height: 1.6;
+}
+
+.user-center-content {
+  display: grid;
+  gap: 18px;
+}

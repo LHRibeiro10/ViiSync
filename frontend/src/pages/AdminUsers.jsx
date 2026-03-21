@@ -129,7 +129,7 @@ function AdminUsers() {
         if (!isCancelled) {
           setPayload(response);
         }
-      } catch (err) {
+      } catch {
         if (!isCancelled) {
           setError("Nao foi possivel carregar a gestao de usuarios.");
         }
@@ -216,7 +216,7 @@ function AdminUsers() {
           : "Seller bloqueado com sucesso."
       );
       setBlockReason("");
-    } catch (err) {
+    } catch {
       setActionFeedback("Nao foi possivel atualizar o status desse seller.");
     } finally {
       setBusyUserId("");

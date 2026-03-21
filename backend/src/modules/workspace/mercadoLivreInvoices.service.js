@@ -1,4 +1,5 @@
 const { getProfitReport } = require("../../services/analyticsDb.service");
+const { resolveSessionContextFromRequest } = require("../auth/auth.service");
 
 const PERIOD_WINDOWS_IN_DAYS = {
   "7d": 7,
@@ -6,8 +7,39 @@ const PERIOD_WINDOWS_IN_DAYS = {
   "90d": 90,
 };
 
+const invoiceStateByUserId = new Map();
+
 function cloneData(value) {
   return JSON.parse(JSON.stringify(value));
+}
+
+function createHttpError(status, message) {
+  const error = new Error(message);
+  error.status = status;
+  return error;
+}
+
+async function resolveViewerUserId(request = {}) {
+  const sessionContext = await resolveSessionContextFromRequest(request);
+
+  if (!sessionContext?.user?.id) {
+    throw createHttpError(401, "Sessao invalida ou expirada.");
+  }
+
+  return sessionContext.user.id;
+}
+
+function getInvoiceState(userId) {
+  if (!invoiceStateByUserId.has(userId)) {
+    invoiceStateByUserId.set(userId, {
+      items: [],
+      initialized: false,
+      initializingPromise: null,
+      lastPullAt: null,
+    });
+  }
+
+  return invoiceStateByUserId.get(userId);
 }
 
 function parseReportDate(dateText) {
@@ -27,7 +59,6 @@ function padNumber(value, size) {
 }
 
 function buildInvoiceKey(index, issuedDate) {
-  const year = issuedDate.getUTCFullYear();
   const month = padNumber(issuedDate.getUTCMonth() + 1, 2);
   const day = padNumber(issuedDate.getUTCDate(), 2);
   return `3526${month}${day}${padNumber(index + 1, 9)}5501000000001${padNumber(index + 1, 8)}`;
@@ -38,7 +69,7 @@ function buildStoragePath(row) {
 }
 
 function buildDocumentUrlFromPath(storagePath, extension) {
-  return `/mock-storage/${storagePath}.${extension}`;
+  return `/storage/${storagePath}.${extension}`;
 }
 
 function buildDocumentUrl(row, extension) {
@@ -67,7 +98,7 @@ function buildInvoiceDownloadBaseName(invoice) {
 
 function buildInvoiceXmlContent(invoice) {
   return `<?xml version="1.0" encoding="UTF-8"?>
-<mercadoLivreInvoiceMock>
+<mercadoLivreInvoice>
   <invoiceId>${escapeXml(invoice.id)}</invoiceId>
   <externalId>${escapeXml(invoice.externalId)}</externalId>
   <orderId>${escapeXml(invoice.orderId)}</orderId>
@@ -79,7 +110,7 @@ function buildInvoiceXmlContent(invoice) {
   <issuedAt>${escapeXml(invoice.issuedAt)}</issuedAt>
   <accessKey>${escapeXml(invoice.accessKey)}</accessKey>
   <storagePath>${escapeXml(invoice.storagePath)}</storagePath>
-</mercadoLivreInvoiceMock>
+</mercadoLivreInvoice>
 `;
 }
 
@@ -131,7 +162,7 @@ function buildPdfBuffer(lines) {
 
 function buildInvoicePdfContent(invoice) {
   return buildPdfBuffer([
-    "ViiSync - DANFE mock Mercado Livre",
+    "ViiSync - DANFE Mercado Livre",
     `NFe ${invoice.invoiceNumber} / serie ${invoice.series}`,
     `Pedido ${invoice.orderId}`,
     `Produto: ${invoice.itemTitle}`,
@@ -146,7 +177,7 @@ async function createInvoiceSeed(request = {}) {
   const rows = await getProfitReport("90d", request);
 
   return rows
-    .filter((row) => row.marketplace === "Mercado Livre")
+    .filter((row) => String(row.marketplace || "").toLowerCase().includes("mercado livre"))
     .sort((left, right) => parseReportDate(left.date) - parseReportDate(right.date))
     .map((row, index) => {
       const issuedAt = parseReportDate(row.date).toISOString();
@@ -177,28 +208,27 @@ async function createInvoiceSeed(request = {}) {
     });
 }
 
-let invoiceStore = [];
-let invoiceStoreInitialized = false;
-let invoiceStorePromise = null;
-let lastPullAt = null;
-
 async function ensureInvoiceStore(request = {}) {
-  if (invoiceStoreInitialized) {
-    return;
+  const userId = await resolveViewerUserId(request);
+  const state = getInvoiceState(userId);
+
+  if (state.initialized) {
+    return { userId, state };
   }
 
-  if (!invoiceStorePromise) {
-    invoiceStorePromise = createInvoiceSeed(request)
+  if (!state.initializingPromise) {
+    state.initializingPromise = createInvoiceSeed(request)
       .then((seed) => {
-        invoiceStore = seed;
-        invoiceStoreInitialized = true;
+        state.items = seed;
+        state.initialized = true;
       })
       .finally(() => {
-        invoiceStorePromise = null;
+        state.initializingPromise = null;
       });
   }
 
-  await invoiceStorePromise;
+  await state.initializingPromise;
+  return { userId, state };
 }
 
 function resolvePeriod(period) {
@@ -238,10 +268,10 @@ function mapInvoiceItem(invoice) {
 }
 
 async function buildInvoicePayload(period = "30d", request = {}) {
-  await ensureInvoiceStore(request);
+  const { state } = await ensureInvoiceStore(request);
   const resolvedPeriod = resolvePeriod(period);
   const periodStart = getPeriodStart(resolvedPeriod);
-  const items = invoiceStore
+  const items = state.items
     .filter((invoice) => !invoice.dismissedAt)
     .filter((invoice) => new Date(invoice.issuedAt).getTime() >= periodStart.getTime())
     .sort((left, right) => new Date(right.issuedAt) - new Date(left.issuedAt))
@@ -249,7 +279,7 @@ async function buildInvoicePayload(period = "30d", request = {}) {
 
   return {
     period: resolvedPeriod,
-    provider: "mercado-livre-mock",
+    provider: "mercado-livre-invoices",
     integrationReady: true,
     meta: {
       total: items.length,
@@ -257,15 +287,14 @@ async function buildInvoicePayload(period = "30d", request = {}) {
       downloadedCount: items.filter((item) => item.isDownloaded).length,
       xmlDownloadedCount: items.filter((item) => item.xmlDownloaded).length,
       pdfDownloadedCount: items.filter((item) => item.pdfDownloaded).length,
-      lastPullAt,
+      lastPullAt: state.lastPullAt,
     },
     items,
   };
 }
 
 async function pullPendingInvoices(period = "30d", request = {}) {
-  // Na integracao real, este ponto deve consultar o access_token salvo,
-  // baixar o XML oficial da NFe e opcionalmente gerar/armazenar o PDF/DANFE.
+  const { state } = await ensureInvoiceStore(request);
   const payload = await buildInvoicePayload(period, request);
   const pendingIds = new Set(
     payload.items.filter((item) => item.canPull).map((item) => item.id)
@@ -281,7 +310,7 @@ async function pullPendingInvoices(period = "30d", request = {}) {
 
   const now = new Date().toISOString();
 
-  invoiceStore = invoiceStore.map((invoice) => {
+  state.items = state.items.map((invoice) => {
     if (!pendingIds.has(invoice.id)) {
       return invoice;
     }
@@ -298,26 +327,24 @@ async function pullPendingInvoices(period = "30d", request = {}) {
     };
   });
 
-  lastPullAt = now;
+  state.lastPullAt = now;
 
   return {
     ...(await buildInvoicePayload(period, request)),
-    message: `${pendingIds.size} NFe(s) marcada(s) como baixadas no mock local.`,
+    message: `${pendingIds.size} NFe(s) marcada(s) como baixadas.`,
     pulledCount: pendingIds.size,
   };
 }
 
 async function pullInvoiceById(invoiceId, request = {}) {
-  await ensureInvoiceStore(request);
-  const invoiceIndex = invoiceStore.findIndex((invoice) => invoice.id === invoiceId);
+  const { state } = await ensureInvoiceStore(request);
+  const invoiceIndex = state.items.findIndex((invoice) => invoice.id === invoiceId);
 
   if (invoiceIndex === -1) {
-    const error = new Error("NFe nao encontrada.");
-    error.status = 404;
-    throw error;
+    throw createHttpError(404, "NFe nao encontrada.");
   }
 
-  const currentInvoice = invoiceStore[invoiceIndex];
+  const currentInvoice = state.items[invoiceIndex];
 
   if (currentInvoice.status === "downloaded") {
     return {
@@ -328,7 +355,7 @@ async function pullInvoiceById(invoiceId, request = {}) {
 
   const now = new Date().toISOString();
 
-  invoiceStore[invoiceIndex] = {
+  state.items[invoiceIndex] = {
     ...currentInvoice,
     status: "downloaded",
     downloadedAt: now,
@@ -343,25 +370,23 @@ async function pullInvoiceById(invoiceId, request = {}) {
     downloadedPdfAt: now,
   };
 
-  lastPullAt = now;
+  state.lastPullAt = now;
 
   return {
-    message: "NFe marcada como baixada no mock local.",
-    invoice: mapInvoiceItem(invoiceStore[invoiceIndex]),
+    message: "NFe marcada como baixada.",
+    invoice: mapInvoiceItem(state.items[invoiceIndex]),
   };
 }
 
 async function dismissInvoiceById(invoiceId, period = "30d", request = {}) {
-  await ensureInvoiceStore(request);
-  const invoiceIndex = invoiceStore.findIndex((invoice) => invoice.id === invoiceId);
+  const { state } = await ensureInvoiceStore(request);
+  const invoiceIndex = state.items.findIndex((invoice) => invoice.id === invoiceId);
 
   if (invoiceIndex === -1) {
-    const error = new Error("NFe nao encontrada.");
-    error.status = 404;
-    throw error;
+    throw createHttpError(404, "NFe nao encontrada.");
   }
 
-  const currentInvoice = invoiceStore[invoiceIndex];
+  const currentInvoice = state.items[invoiceIndex];
 
   if (currentInvoice.dismissedAt) {
     return {
@@ -371,43 +396,35 @@ async function dismissInvoiceById(invoiceId, period = "30d", request = {}) {
   }
 
   if (currentInvoice.status !== "downloaded") {
-    const error = new Error("So e possivel excluir da lista NFes ja baixadas.");
-    error.status = 409;
-    throw error;
+    throw createHttpError(409, "So e possivel excluir da lista NFes ja baixadas.");
   }
 
-  invoiceStore[invoiceIndex] = {
+  state.items[invoiceIndex] = {
     ...currentInvoice,
     dismissedAt: new Date().toISOString(),
   };
 
   return {
     ...(await buildInvoicePayload(period, request)),
-    message: "NFe removida da lista visivel no mock local.",
+    message: "NFe removida da lista visivel.",
   };
 }
 
 async function downloadInvoiceDocument(invoiceId, format = "xml", request = {}) {
-  await ensureInvoiceStore(request);
+  const { state } = await ensureInvoiceStore(request);
   const resolvedFormat = format === "pdf" ? "pdf" : "xml";
-  const invoice = invoiceStore.find((item) => item.id === invoiceId);
+  const invoice = state.items.find((item) => item.id === invoiceId);
 
   if (!invoice) {
-    const error = new Error("NFe nao encontrada.");
-    error.status = 404;
-    throw error;
+    throw createHttpError(404, "NFe nao encontrada.");
   }
 
   if (resolvedFormat === "xml" && (!invoice.downloadedXmlAt || !invoice.xmlUrl)) {
-    const error = new Error("XML ainda nao esta disponivel para download.");
-    error.status = 409;
-    throw error;
+    throw createHttpError(409, "XML ainda nao esta disponivel para download.");
   }
 
   if (resolvedFormat === "pdf" && (!invoice.downloadedPdfAt || !invoice.pdfUrl)) {
-    const error = new Error("PDF ainda nao esta disponivel para download.");
-    error.status = 409;
-    throw error;
+    throw createHttpError(409, "PDF ainda nao esta disponivel para download.");
   }
 
   return {

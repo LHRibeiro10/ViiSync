@@ -19,7 +19,7 @@ function Products() {
       try {
         const result = await getProducts();
         setProducts(result);
-      } catch (err) {
+      } catch {
         setError("Nao foi possivel carregar os produtos.");
       } finally {
         setLoading(false);

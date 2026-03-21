@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import PageHeader from "../components/PageHeader";
-import { useAnalyticsPeriod } from "../contexts/AnalyticsPeriodContext";
+import { useAnalyticsPeriod } from "../contexts/useAnalyticsPeriod";
 import { getProductDetail } from "../services/api";
 import {
   formatCurrency,
@@ -31,7 +31,7 @@ function ProductDetail() {
         if (!isCancelled) {
           setPayload(response);
         }
-      } catch (err) {
+      } catch {
         if (!isCancelled) {
           setError("Nao foi possivel carregar o detalhe do produto.");
         }

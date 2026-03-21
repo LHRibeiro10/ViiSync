@@ -119,6 +119,70 @@
   line-height: 1.6;
 }
 
+.finance-recurring-form {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.finance-recurring-form label {
+  display: grid;
+  gap: 6px;
+}
+
+.finance-recurring-form label span {
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.finance-recurring-form input {
+  min-height: 40px;
+  padding: 0 12px;
+  border-radius: 12px;
+  border: 1px solid var(--input-border);
+  background: var(--input-bg);
+  color: var(--text-strong);
+  font: inherit;
+}
+
+.finance-recurring-form button {
+  min-height: 42px;
+  padding: 0 14px;
+  border-radius: 12px;
+  border: 1px solid transparent;
+  background: linear-gradient(135deg, var(--accent-strong) 0%, var(--accent) 100%);
+  color: #ffffff;
+  font: inherit;
+  font-weight: 800;
+  cursor: pointer;
+  box-shadow: var(--button-primary-shadow);
+}
+
+.finance-recurring-form button:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
+}
+
+.finance-recurring-remove {
+  min-height: 34px;
+  padding: 0 10px;
+  border-radius: 10px;
+  border: 1px solid var(--danger-border);
+  background: var(--danger-soft);
+  color: var(--danger);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.finance-recurring-remove:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
 .finance-cashflow-list,
 .finance-list,
 .finance-receivables-grid,
@@ -550,6 +614,10 @@
   .finance-list-item {
     flex-direction: column;
     align-items: stretch;
+  }
+
+  .finance-recurring-form {
+    grid-template-columns: 1fr;
   }
 
   .finance-cashflow-values,

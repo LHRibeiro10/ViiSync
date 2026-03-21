@@ -15,41 +15,41 @@ function sendError(res, error, fallbackMessage) {
   return res.status(500).json({ error: fallbackMessage });
 }
 
-function fetchObservability(req, res) {
+async function fetchObservability(req, res) {
   try {
-    res.json(getObservability());
+    res.json(await getObservability());
   } catch (error) {
     sendError(res, error, "Nao foi possivel carregar a observabilidade.");
   }
 }
 
-function fetchAdminUsers(req, res) {
+async function fetchAdminUsers(req, res) {
   try {
-    res.json(getAdminUsers());
+    res.json(await getAdminUsers());
   } catch (error) {
     sendError(res, error, "Nao foi possivel carregar os sellers.");
   }
 }
 
-function postAdminUserBlock(req, res) {
+async function postAdminUserBlock(req, res) {
   try {
-    res.json(toggleAdminUserBlock(req.params.userId, req.body));
+    res.json(await toggleAdminUserBlock(req.params.userId, req.body));
   } catch (error) {
     sendError(res, error, "Nao foi possivel atualizar o bloqueio do seller.");
   }
 }
 
-function fetchAuditTrail(req, res) {
+async function fetchAuditTrail(req, res) {
   try {
-    res.json(getAuditTrail());
+    res.json(await getAuditTrail());
   } catch (error) {
     sendError(res, error, "Nao foi possivel carregar a trilha de auditoria.");
   }
 }
 
-function fetchAdminIntegrations(req, res) {
+async function fetchAdminIntegrations(req, res) {
   try {
-    res.json(getAdminIntegrations());
+    res.json(await getAdminIntegrations());
   } catch (error) {
     sendError(res, error, "Nao foi possivel carregar o painel de integracoes.");
   }

@@ -1,9 +1,15 @@
 import { useEffect, useState } from "react";
-import { getProfitReport, getReports } from "../services/api";
+import {
+  createAdditionalReportCost,
+  getAdditionalReportCosts,
+  getProfitReport,
+  getReports,
+  removeAdditionalReportCost,
+} from "../services/api";
 import PageHeader from "../components/PageHeader";
 import SummaryCard from "../components/SummaryCard";
 import Panel from "../components/Panel";
-import { useAnalyticsPeriod } from "../contexts/AnalyticsPeriodContext";
+import { useAnalyticsPeriod } from "../contexts/useAnalyticsPeriod";
 import "./Reports.css";
 
 const currencyFormatter = new Intl.NumberFormat("pt-BR", {
@@ -823,7 +829,7 @@ function finalizeWorksheetLayout(
   worksheet.autoFilter = `${getExcelColumnLetter(startColumn)}${headerRowNumber}:${getExcelColumnLetter(endColumn)}${headerRowNumber}`;
 }
 
-async function buildProfitReportWorkbook(rows, summary) {
+async function buildProfitReportWorkbook(rows, summary, netProfitFinal = summary.netProfit) {
   const workbook = await createWorkbook();
   const worksheet = workbook.addWorksheet("Rentabilidade", {
     properties: { defaultRowHeight: 20 },
@@ -870,7 +876,7 @@ async function buildProfitReportWorkbook(rows, summary) {
     [7, "Receita bruta total"],
     [8, summary.grossRevenue],
     [12, "Lucro liquido total"],
-    [13, summary.netProfit],
+    [13, netProfitFinal],
   ]);
   summaryRowA.height = 16.5;
   styleSummaryLabelCell(summaryRowA.getCell(2), { leftStyle: "medium" });
@@ -879,7 +885,7 @@ async function buildProfitReportWorkbook(rows, summary) {
   styleSummaryValueCell(summaryRowA.getCell(8));
   styleSummaryLabelCell(summaryRowA.getCell(12));
   styleSummaryValueCell(summaryRowA.getCell(13), {
-    fontColor: summary.netProfit >= 0 ? "FF15803D" : "FFBE123C",
+    fontColor: netProfitFinal >= 0 ? "FF15803D" : "FFBE123C",
   });
   summaryRowA.getCell(14).border = createCellBorder({
     topStyle: "thin",
@@ -997,11 +1003,11 @@ async function buildProfitReportWorkbook(rows, summary) {
     [9, summary.marketplaceFee],
     [10, summary.shippingPaid],
     [11, summary.grossRevenue],
-    [12, summary.netProfit],
+    [12, netProfitFinal],
     [13, null],
     [14, null],
   ]);
-  styleTotalRow(totalRow, startColumn, endColumn, getValueTone(summary.netProfit));
+  styleTotalRow(totalRow, startColumn, endColumn, getValueTone(netProfitFinal));
   applyIntegerFormat(totalRow.getCell(6));
   if (SHOULD_AGGREGATE_UNIT_SALE_PRICE) {
     applyCurrencyFormat(totalRow.getCell(7));
@@ -1228,14 +1234,6 @@ async function downloadWorkbookFile(filename, workbook) {
   triggerFileDownload(filename, blob);
 }
 
-function createExpenseId() {
-  if (typeof crypto !== "undefined" && crypto.randomUUID) {
-    return crypto.randomUUID();
-  }
-
-  return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
-}
-
 function AdditionalExpensesPanel({
   expenses,
   expenseForm,
@@ -1248,6 +1246,8 @@ function AdditionalExpensesPanel({
   onRemove,
   onExportExpenses,
   exportingExpenses,
+  savingExpense,
+  removingExpenseId,
 }) {
   return (
     <div className="panel expenses-panel">
@@ -1293,8 +1293,8 @@ function AdditionalExpensesPanel({
             />
           </label>
 
-          <button type="submit" className="expenses-submit">
-            Adicionar gasto
+          <button type="submit" className="expenses-submit" disabled={savingExpense}>
+            {savingExpense ? "Salvando..." : "Adicionar gasto"}
           </button>
         </form>
 
@@ -1341,8 +1341,9 @@ function AdditionalExpensesPanel({
                     type="button"
                     className="expense-remove-button"
                     onClick={() => onRemove(expense.id)}
+                    disabled={removingExpenseId === expense.id}
                   >
-                    Remover
+                    {removingExpenseId === expense.id ? "Removendo..." : "Remover"}
                   </button>
                 </div>
               </div>
@@ -1386,28 +1387,44 @@ function Reports() {
   });
   const [formError, setFormError] = useState("");
   const [additionalExpenses, setAdditionalExpenses] = useState([]);
+  const [savingExpense, setSavingExpense] = useState(false);
+  const [removingExpenseId, setRemovingExpenseId] = useState("");
 
   useEffect(() => {
+    let isCancelled = false;
+
     async function loadReports() {
       try {
         setError("");
         setLoading(true);
 
-        const [reportsResult, profitReportResult] = await Promise.all([
+        const [reportsResult, profitReportResult, additionalCostsResult] = await Promise.all([
           getReports(selectedPeriod),
           getProfitReport(selectedPeriod),
+          getAdditionalReportCosts(selectedPeriod),
         ]);
 
-        setData(reportsResult);
-        setProfitReportRows(profitReportResult);
-      } catch (err) {
-        setError("Nao foi possivel carregar os relatorios.");
+        if (!isCancelled) {
+          setData(reportsResult);
+          setProfitReportRows(profitReportResult);
+          setAdditionalExpenses(additionalCostsResult?.items || []);
+        }
+      } catch {
+        if (!isCancelled) {
+          setError("Nao foi possivel carregar os relatorios.");
+        }
       } finally {
-        setLoading(false);
+        if (!isCancelled) {
+          setLoading(false);
+        }
       }
     }
 
     loadReports();
+
+    return () => {
+      isCancelled = true;
+    };
   }, [selectedPeriod]);
 
   function handleExpenseFieldChange(event) {
@@ -1423,7 +1440,7 @@ function Reports() {
     }
   }
 
-  function handleAddExpense(event) {
+  async function handleAddExpense(event) {
     event.preventDefault();
 
     const description = expenseForm.description.trim();
@@ -1440,28 +1457,43 @@ function Reports() {
       return;
     }
 
-    setAdditionalExpenses((currentExpenses) => [
-      ...currentExpenses,
-      {
-        id: createExpenseId(),
-        description,
-        value: parsedValue,
+    try {
+      setSavingExpense(true);
+      setFormError("");
+
+      const response = await createAdditionalReportCost(
+        {
+          description,
+          value: parsedValue,
+          monthReference,
+        },
+        selectedPeriod
+      );
+
+      setAdditionalExpenses(response.items || []);
+      setExpenseForm({
+        description: "",
+        value: "",
         monthReference,
-        createdAt: new Date().toISOString(),
-      },
-    ]);
-    setExpenseForm({
-      description: "",
-      value: "",
-      monthReference,
-    });
-    setFormError("");
+      });
+    } catch (error) {
+      setFormError(error.message || "Nao foi possivel salvar esse gasto adicional.");
+    } finally {
+      setSavingExpense(false);
+    }
   }
 
-  function handleRemoveExpense(expenseId) {
-    setAdditionalExpenses((currentExpenses) =>
-      currentExpenses.filter((expense) => expense.id !== expenseId)
-    );
+  async function handleRemoveExpense(expenseId) {
+    try {
+      setRemovingExpenseId(expenseId);
+      setFormError("");
+      const response = await removeAdditionalReportCost(expenseId, selectedPeriod);
+      setAdditionalExpenses(response.items || []);
+    } catch (error) {
+      setFormError(error.message || "Nao foi possivel remover esse gasto adicional.");
+    } finally {
+      setRemovingExpenseId("");
+    }
   }
 
   if (loading) return <div className="screen-message">Carregando relatorios...</div>;
@@ -1492,7 +1524,7 @@ function Reports() {
 
       await downloadWorkbookFile(
         "relatorio_rentabilidade_viisync.xlsx",
-        await buildProfitReportWorkbook(profitReportRows, profitReportSummary)
+        await buildProfitReportWorkbook(profitReportRows, profitReportSummary, adjustedProfit)
       );
     } finally {
       setExporting(false);
@@ -1602,6 +1634,8 @@ function Reports() {
         onRemove={handleRemoveExpense}
         onExportExpenses={handleExportAdditionalExpenses}
         exportingExpenses={exportingExpenses}
+        savingExpense={savingExpense}
+        removingExpenseId={removingExpenseId}
       />
 
       <div className="panels">

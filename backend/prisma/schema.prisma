@@ -32,6 +32,8 @@ model User {
   passwordHash    String
   role            UserRole   @default(SELLER)
   status          UserStatus @default(PENDING)
+  blockedAt       DateTime?
+  blockReason     String?
   emailVerifiedAt DateTime?
   lastLoginAt     DateTime?
   acceptedTermsAt DateTime?
@@ -42,6 +44,9 @@ model User {
   products                Product[]
   orders                  Order[]
   additionalCosts         AdditionalCost[]
+  recurringExpenses       RecurringExpense[]
+  mercadoLivreQuestions   MercadoLivreQuestion[]
+  feedbackTickets         FeedbackTicket[]
   memberships             OrganizationMembership[]
   sessions                UserSession[]
   passwordResetTokens     PasswordResetToken[]
@@ -129,14 +134,20 @@ model MarketplaceAccount {
   sellerId       String?
   accessToken    String?
   refreshToken   String?
+  tokenType      String?
+  scope          String?
+  siteId         String?
+  integrationStatus String @default("disconnected")
   tokenExpiresAt DateTime?
+  lastSyncedAt   DateTime?
   isActive       Boolean   @default(true)
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
 
-  user     User      @relation(fields: [userId], references: [id])
-  products Product[]
-  orders   Order[]
+  user        User                   @relation(fields: [userId], references: [id])
+  products    Product[]
+  orders      Order[]
+  mlQuestions MercadoLivreQuestion[]
 }
 
 model Product {
@@ -148,6 +159,10 @@ model Product {
   sku                  String?
   thumbnail            String?
   category             String?
+  listingPrice         Float?
+  listingStatus        String?
+  availableQuantity    Int?
+  lastSyncedAt         DateTime?
   createdAt            DateTime @default(now())
   updatedAt            DateTime @updatedAt
 
@@ -226,6 +241,91 @@ model AdditionalCost {
   updatedAt      DateTime @updatedAt
 
   user User @relation(fields: [userId], references: [id])
+}
+
+model RecurringExpense {
+  id          String   @id @default(uuid())
+  userId      String
+  description String
+  amount      Float
+  category    String   @default("Operacao")
+  dueDay      Int      @default(1)
+  status      String   @default("Em uso")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, dueDay])
+}
+
+model MercadoLivreQuestion {
+  id                   String    @id @default(uuid())
+  userId               String
+  marketplaceAccountId String
+  externalQuestionId   String
+  itemId               String
+  itemTitle            String?
+  questionText         String
+  answerText           String?
+  buyerNickname        String?
+  thumbnail            String?
+  sku                  String?
+  status               String    @default("unanswered")
+  createdAtMl          DateTime
+  answeredAtMl         DateTime?
+  dismissedAt          DateTime?
+  lastSyncedAt         DateTime  @default(now())
+  rawPayload           Json?
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+
+  user               User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  marketplaceAccount MarketplaceAccount @relation(fields: [marketplaceAccountId], references: [id], onDelete: Cascade)
+
+  @@unique([marketplaceAccountId, externalQuestionId])
+  @@index([userId, marketplaceAccountId, dismissedAt])
+  @@index([userId, createdAtMl])
+  @@index([itemId])
+}
+
+model FeedbackTicket {
+  id            String    @id @default(uuid())
+  ticketCode    String    @unique
+  userId        String
+  type          String
+  area          String
+  subject       String
+  message       String
+  status        String    @default("new")
+  priority      String    @default("medium")
+  sourcePath    String?
+  adminResponse String?
+  resolutionEta DateTime?
+  resolvedAt    DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  user    User                    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  history FeedbackTicketHistory[]
+
+  @@index([userId, createdAt])
+  @@index([status, priority, createdAt])
+}
+
+model FeedbackTicketHistory {
+  id            String    @id @default(uuid())
+  ticketId      String
+  status        String
+  note          String
+  actorType     String
+  responseText  String?
+  resolutionEta DateTime?
+  createdAt     DateTime  @default(now())
+
+  ticket FeedbackTicket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+
+  @@index([ticketId, createdAt])
 }
 
 model AssistantConversation {

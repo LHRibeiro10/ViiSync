@@ -67,6 +67,12 @@ function formatPercent(value) {
   return `${percentFormatter.format(Number.isFinite(value) ? value : 0)}%`;
 }
 
+function createHttpError(status, message) {
+  const error = new Error(message);
+  error.status = status;
+  return error;
+}
+
 function startDateForPeriod(period) {
   const resolved = resolvePeriod(period);
   const now = new Date();
@@ -82,6 +88,236 @@ function startDateForPeriod(period) {
 
   start.setHours(0, 0, 0, 0);
   return start;
+}
+
+function toMonthKeyFromDate(value) {
+  const date = value instanceof Date ? value : new Date(value);
+
+  if (Number.isNaN(date.getTime())) {
+    return null;
+  }
+
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  return `${year}-${month}`;
+}
+
+function parseReferenceMonth(referenceMonth) {
+  const text = String(referenceMonth || "").trim();
+  const match = /^(\d{4})-(\d{2})$/.exec(text);
+
+  if (!match) {
+    return null;
+  }
+
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+
+  if (!Number.isInteger(year) || !Number.isInteger(month) || month < 1 || month > 12) {
+    return null;
+  }
+
+  return text;
+}
+
+function listMonthKeysBetween(startDate, endDate) {
+  const start = new Date(startDate);
+  const end = new Date(endDate);
+
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
+    return [];
+  }
+
+  if (start.getTime() > end.getTime()) {
+    return [];
+  }
+
+  const keys = [];
+  let year = start.getFullYear();
+  let month = start.getMonth();
+  const endYear = end.getFullYear();
+  const endMonth = end.getMonth();
+
+  while (year < endYear || (year === endYear && month <= endMonth)) {
+    keys.push(`${year}-${String(month + 1).padStart(2, "0")}`);
+
+    month += 1;
+    if (month > 11) {
+      month = 0;
+      year += 1;
+    }
+  }
+
+  return keys;
+}
+
+function clampDueDayToMonth(dueDay, year, monthIndex) {
+  const monthLastDay = new Date(year, monthIndex + 1, 0).getDate();
+  return Math.max(1, Math.min(Number(dueDay) || 1, monthLastDay));
+}
+
+function countRecurringOccurrencesInRange(dueDay, startDate, endDate) {
+  const start = new Date(startDate);
+  const end = new Date(endDate);
+
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
+    return 0;
+  }
+
+  if (start.getTime() > end.getTime()) {
+    return 0;
+  }
+
+  let occurrences = 0;
+  let year = start.getFullYear();
+  let month = start.getMonth();
+  const endYear = end.getFullYear();
+  const endMonth = end.getMonth();
+
+  while (year < endYear || (year === endYear && month <= endMonth)) {
+    const day = clampDueDayToMonth(dueDay, year, month);
+    const dueDate = new Date(year, month, day, 0, 0, 0, 0);
+
+    if (dueDate.getTime() >= start.getTime() && dueDate.getTime() <= end.getTime()) {
+      occurrences += 1;
+    }
+
+    month += 1;
+    if (month > 11) {
+      month = 0;
+      year += 1;
+    }
+  }
+
+  return occurrences;
+}
+
+function mapAdditionalCostRow(row) {
+  return {
+    id: row.id,
+    description: row.description,
+    value: round2(Number(row.amount || 0)),
+    monthReference: row.referenceMonth,
+    createdAt: row.createdAt?.toISOString?.() || null,
+    updatedAt: row.updatedAt?.toISOString?.() || null,
+  };
+}
+
+function normalizeText(value) {
+  return String(value || "").trim();
+}
+
+function normalizeAdditionalCostInput(payload = {}, { partial = false } = {}) {
+  const normalized = {};
+
+  if (!partial || payload.description !== undefined) {
+    const description = normalizeText(payload.description);
+
+    if (description.length < 2) {
+      throw createHttpError(400, "Informe a descricao do gasto adicional.");
+    }
+
+    normalized.description = description;
+  }
+
+  if (!partial || payload.amount !== undefined || payload.value !== undefined) {
+    const amount = Number(
+      payload.amount !== undefined ? payload.amount : payload.value
+    );
+
+    if (!Number.isFinite(amount) || amount <= 0) {
+      throw createHttpError(400, "Informe um valor valido maior que zero.");
+    }
+
+    normalized.amount = round2(amount);
+  }
+
+  if (!partial || payload.referenceMonth !== undefined || payload.monthReference !== undefined) {
+    const referenceMonth = parseReferenceMonth(
+      payload.referenceMonth !== undefined
+        ? payload.referenceMonth
+        : payload.monthReference
+    );
+
+    if (!referenceMonth) {
+      throw createHttpError(400, "Informe um mes de referencia valido no formato YYYY-MM.");
+    }
+
+    normalized.referenceMonth = referenceMonth;
+  }
+
+  return normalized;
+}
+
+async function getFinancialAdjustmentsForUser(userId, period = "30d") {
+  if (!userId) {
+    return {
+      recurringTotal: 0,
+      additionalTotal: 0,
+      totalAdjustments: 0,
+      additionalCosts: [],
+      monthKeys: [],
+    };
+  }
+
+  const resolvedPeriod = resolvePeriod(period);
+  const periodStart = startDateForPeriod(resolvedPeriod);
+  const periodEnd = new Date();
+  const monthKeys = listMonthKeysBetween(periodStart, periodEnd);
+
+  const [recurringExpenses, additionalCosts] = await Promise.all([
+    prisma.recurringExpense.findMany({
+      where: {
+        userId,
+      },
+      select: {
+        amount: true,
+        dueDay: true,
+      },
+    }),
+    prisma.additionalCost.findMany({
+      where: {
+        userId,
+        ...(monthKeys.length
+          ? {
+              referenceMonth: {
+                in: monthKeys,
+              },
+            }
+          : {}),
+      },
+      orderBy: [{ referenceMonth: "asc" }, { createdAt: "asc" }],
+    }),
+  ]);
+
+  const recurringTotal = round2(
+    recurringExpenses.reduce((sum, item) => {
+      const amount = Number(item.amount || 0);
+      if (!Number.isFinite(amount) || amount <= 0) {
+        return sum;
+      }
+
+      const occurrences = countRecurringOccurrencesInRange(
+        item.dueDay,
+        periodStart,
+        periodEnd
+      );
+
+      return sum + amount * occurrences;
+    }, 0)
+  );
+
+  const additionalTotal = round2(
+    additionalCosts.reduce((sum, item) => sum + Number(item.amount || 0), 0)
+  );
+
+  return {
+    recurringTotal,
+    additionalTotal,
+    totalAdjustments: round2(recurringTotal + additionalTotal),
+    additionalCosts: additionalCosts.map(mapAdditionalCostRow),
+    monthKeys,
+  };
 }
 
 function normalizeStatus(status) {
@@ -189,31 +425,13 @@ function emptySettingsPayload() {
 async function resolveViewerUser(request = {}) {
   const sessionContext = await resolveSessionContextFromRequest(request);
 
-  if (sessionContext?.user?.id) {
-    const found = await prisma.user.findUnique({
-      where: {
-        id: sessionContext.user.id,
-      },
-      include: {
-        memberships: {
-          include: {
-            organization: true,
-          },
-          orderBy: {
-            createdAt: "asc",
-          },
-        },
-      },
-    });
-
-    if (found) {
-      return found;
-    }
+  if (!sessionContext?.user?.id) {
+    throw createHttpError(401, "Sessao invalida ou expirada.");
   }
 
-  return prisma.user.findFirst({
-    orderBy: {
-      createdAt: "asc",
+  const found = await prisma.user.findUnique({
+    where: {
+      id: sessionContext.user.id,
     },
     include: {
       memberships: {
@@ -226,6 +444,12 @@ async function resolveViewerUser(request = {}) {
       },
     },
   });
+
+  if (!found) {
+    throw createHttpError(401, "Sessao invalida ou expirada.");
+  }
+
+  return found;
 }
 
 function toItemGrossRevenue(item) {
@@ -388,14 +612,13 @@ async function fetchOrderDomainRows(userId, period = "30d") {
 
 async function getDashboard(period = "30d", request = {}) {
   const user = await resolveViewerUser(request);
-  if (!user) {
-    return emptyDashboardPayload();
-  }
 
   const rows = await fetchOrderDomainRows(user.id, period);
   const revenue = rows.reduce((sum, row) => sum + row.grossRevenue, 0);
-  const profit = rows.reduce((sum, row) => sum + row.netProfit, 0);
+  const profitBeforeAdjustments = rows.reduce((sum, row) => sum + row.netProfit, 0);
   const sales = rows.reduce((sum, row) => sum + row.quantity, 0);
+  const adjustments = await getFinancialAdjustmentsForUser(user.id, period);
+  const adjustedProfit = round2(profitBeforeAdjustments - adjustments.totalAdjustments);
   const productsByRevenue = rows.reduce((map, row) => {
     const current = map.get(row.product) || {
       id: row.id,
@@ -425,7 +648,11 @@ async function getDashboard(period = "30d", request = {}) {
   return {
     summary: {
       revenue: round2(revenue),
-      profit: round2(profit),
+      profit: adjustedProfit,
+      profitBeforeAdjustments: round2(profitBeforeAdjustments),
+      recurringExpenses: adjustments.recurringTotal,
+      additionalCosts: adjustments.additionalTotal,
+      adjustmentsTotal: adjustments.totalAdjustments,
       sales,
       averageTicket: sales ? round2(revenue / sales) : 0,
     },
@@ -436,9 +663,6 @@ async function getDashboard(period = "30d", request = {}) {
 
 async function getProfitTable(period = "30d", request = {}) {
   const user = await resolveViewerUser(request);
-  if (!user) {
-    return [];
-  }
 
   const rows = await fetchOrderDomainRows(user.id, period);
 
@@ -467,9 +691,6 @@ async function getProfitTable(period = "30d", request = {}) {
 
 async function getProfitReport(period = "30d", request = {}) {
   const user = await resolveViewerUser(request);
-  if (!user) {
-    return [];
-  }
 
   const rows = await fetchOrderDomainRows(user.id, period);
 
@@ -493,9 +714,6 @@ async function getProfitReport(period = "30d", request = {}) {
 
 async function getOrders(request = {}) {
   const user = await resolveViewerUser(request);
-  if (!user) {
-    return [];
-  }
 
   const orders = await prisma.order.findMany({
     where: {
@@ -526,9 +744,6 @@ async function getOrders(request = {}) {
 
 async function getProducts(request = {}) {
   const user = await resolveViewerUser(request);
-  if (!user) {
-    return [];
-  }
 
   const products = await prisma.product.findMany({
     where: {
@@ -594,9 +809,6 @@ async function getProducts(request = {}) {
 
 async function getAccounts(request = {}) {
   const user = await resolveViewerUser(request);
-  if (!user) {
-    return [];
-  }
 
   const accounts = await prisma.marketplaceAccount.findMany({
     where: {
@@ -637,14 +849,13 @@ async function getAccounts(request = {}) {
 
 async function getReports(period = "30d", request = {}) {
   const user = await resolveViewerUser(request);
-  if (!user) {
-    return emptyReportsPayload();
-  }
 
   const rows = await fetchOrderDomainRows(user.id, period);
   const totalRevenue = rows.reduce((sum, row) => sum + row.grossRevenue, 0);
-  const totalProfit = rows.reduce((sum, row) => sum + row.netProfit, 0);
+  const totalProfitBeforeAdjustments = rows.reduce((sum, row) => sum + row.netProfit, 0);
   const totalOrders = rows.reduce((sum, row) => sum + row.quantity, 0);
+  const adjustments = await getFinancialAdjustmentsForUser(user.id, period);
+  const totalProfit = round2(totalProfitBeforeAdjustments - adjustments.totalAdjustments);
   const averageMargin = totalRevenue ? (totalProfit / totalRevenue) * 100 : 0;
 
   const channelsMap = rows.reduce((map, row) => {
@@ -703,8 +914,14 @@ async function getReports(period = "30d", request = {}) {
     summary: {
       totalRevenue: formatCurrency(totalRevenue),
       totalProfit: formatCurrency(totalProfit),
+      totalProfitBeforeAdjustments: formatCurrency(totalProfitBeforeAdjustments),
       totalOrders,
       averageMargin: formatPercent(averageMargin),
+      adjustments: {
+        recurringExpenses: formatCurrency(adjustments.recurringTotal),
+        additionalCosts: formatCurrency(adjustments.additionalTotal),
+        total: formatCurrency(adjustments.totalAdjustments),
+      },
     },
     channels,
     topProfitableProducts,
@@ -714,9 +931,6 @@ async function getReports(period = "30d", request = {}) {
 
 async function getSettings(request = {}) {
   const user = await resolveViewerUser(request);
-  if (!user) {
-    return emptySettingsPayload();
-  }
 
   const company = user.memberships?.[0]?.organization?.name || "ViiSync Seller";
 
@@ -742,9 +956,6 @@ async function getSettings(request = {}) {
 
 async function getChartData(period = "30d", request = {}) {
   const user = await resolveViewerUser(request);
-  if (!user) {
-    return [];
-  }
 
   const rows = await fetchOrderDomainRows(user.id, period);
   const groupedRows = groupRowsByPeriod(rows, period);
@@ -753,6 +964,112 @@ async function getChartData(period = "30d", request = {}) {
     label: group.period,
     revenue: round2(group.revenueValue),
   }));
+}
+
+async function listAdditionalCosts(period = "30d", request = {}) {
+  const user = await resolveViewerUser(request);
+  const resolvedPeriod = resolvePeriod(period);
+  const adjustments = await getFinancialAdjustmentsForUser(user.id, resolvedPeriod);
+
+  return {
+    period: resolvedPeriod,
+    summary: {
+      count: adjustments.additionalCosts.length,
+      total: round2(adjustments.additionalTotal),
+    },
+    items: adjustments.additionalCosts,
+  };
+}
+
+async function createAdditionalCost(payload = {}, period = "30d", request = {}) {
+  const user = await resolveViewerUser(request);
+  const normalized = normalizeAdditionalCostInput(payload, { partial: false });
+
+  await prisma.additionalCost.create({
+    data: {
+      userId: user.id,
+      description: normalized.description,
+      amount: normalized.amount,
+      referenceMonth: normalized.referenceMonth,
+    },
+  });
+
+  return {
+    ...(await listAdditionalCosts(period, request)),
+    message: "Gasto adicional cadastrado com sucesso.",
+  };
+}
+
+async function updateAdditionalCost(costId, payload = {}, period = "30d", request = {}) {
+  const user = await resolveViewerUser(request);
+  const id = normalizeText(costId);
+
+  if (!id) {
+    throw createHttpError(400, "Gasto adicional invalido.");
+  }
+
+  const existing = await prisma.additionalCost.findFirst({
+    where: {
+      id,
+      userId: user.id,
+    },
+  });
+
+  if (!existing) {
+    throw createHttpError(404, "Gasto adicional nao encontrado.");
+  }
+
+  const normalized = normalizeAdditionalCostInput(payload, { partial: true });
+
+  if (!Object.keys(normalized).length) {
+    throw createHttpError(400, "Nenhuma alteracao valida foi informada.");
+  }
+
+  await prisma.additionalCost.update({
+    where: {
+      id: existing.id,
+    },
+    data: normalized,
+  });
+
+  return {
+    ...(await listAdditionalCosts(period, request)),
+    message: "Gasto adicional atualizado com sucesso.",
+  };
+}
+
+async function removeAdditionalCost(costId, period = "30d", request = {}) {
+  const user = await resolveViewerUser(request);
+  const id = normalizeText(costId);
+
+  if (!id) {
+    throw createHttpError(400, "Gasto adicional invalido.");
+  }
+
+  const existing = await prisma.additionalCost.findFirst({
+    where: {
+      id,
+      userId: user.id,
+    },
+    select: {
+      id: true,
+    },
+  });
+
+  if (!existing) {
+    throw createHttpError(404, "Gasto adicional nao encontrado.");
+  }
+
+  await prisma.additionalCost.delete({
+    where: {
+      id: existing.id,
+    },
+  });
+
+  return {
+    ...(await listAdditionalCosts(period, request)),
+    message: "Gasto adicional removido com sucesso.",
+  };
 }
 
 async function getAnalyticsSnapshot(period = "30d", request = {}) {
@@ -773,15 +1090,20 @@ async function getAnalyticsSnapshot(period = "30d", request = {}) {
 }
 
 module.exports = {
+  createAdditionalCost,
   getAccounts,
+  getFinancialAdjustmentsForUser,
   getAnalyticsSnapshot,
   getChartData,
   getDashboard,
+  listAdditionalCosts,
   getOrders,
   getProducts,
   getProfitReport,
   getProfitTable,
   getReports,
   getSettings,
+  removeAdditionalCost,
   resolvePeriod,
+  updateAdditionalCost,
 };

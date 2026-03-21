@@ -8,7 +8,9 @@ const {
   fetchMercadoLivreInvoices,
   fetchOperationalCalendar,
   fetchProductDetail,
+  deleteRecurringExpense,
   postDismissMercadoLivreInvoice,
+  postRecurringExpense,
   postPullMercadoLivreInvoice,
   postPullPendingMercadoLivreInvoices,
   postAutomationToggle,
@@ -18,6 +20,8 @@ const router = express.Router();
 
 router.get("/products/:productId", fetchProductDetail);
 router.get("/finance", fetchFinanceCenter);
+router.post("/finance/recurring-expenses", postRecurringExpense);
+router.delete("/finance/recurring-expenses/:expenseId", deleteRecurringExpense);
 router.get("/finance/mercadolivre-invoices", fetchMercadoLivreInvoices);
 router.get(
   "/finance/mercadolivre-invoices/:invoiceId/download/:format",

@@ -81,7 +81,14 @@ async function requestJson(path, options = {}) {
 }
 
 async function requestBlob(path, options = {}) {
-  const response = await fetch(`${API_BASE_URL}${path}`, options);
+  const sessionToken = getSessionTokenFromStorage();
+  const response = await fetch(`${API_BASE_URL}${path}`, {
+    ...options,
+    headers: {
+      ...(sessionToken ? { Authorization: `Bearer ${sessionToken}` } : {}),
+      ...(options.headers || {}),
+    },
+  });
 
   if (!response.ok) {
     const errorPayload = await response.json().catch(() => null);
@@ -159,12 +166,58 @@ export async function getReports(period = "30d") {
   return requestJson(`/reports?period=${period}`);
 }
 
+export async function getAdditionalReportCosts(period = "30d") {
+  return requestJson(`/reports/additional-costs?period=${period}`);
+}
+
+export async function createAdditionalReportCost(payload, period = "30d") {
+  return requestJson("/reports/additional-costs", {
+    method: "POST",
+    body: {
+      ...payload,
+      period,
+    },
+  });
+}
+
+export async function updateAdditionalReportCost(costId, payload, period = "30d") {
+  return requestJson(`/reports/additional-costs/${costId}`, {
+    method: "PATCH",
+    body: {
+      ...payload,
+      period,
+    },
+  });
+}
+
+export async function removeAdditionalReportCost(costId, period = "30d") {
+  return requestJson(`/reports/additional-costs/${costId}?period=${period}`, {
+    method: "DELETE",
+  });
+}
+
 export async function getSettings() {
   return requestJson("/settings");
 }
 
 export async function getFinanceCenter(period = "30d") {
   return requestJson(`/workspace/finance?period=${period}`);
+}
+
+export async function createRecurringFinanceExpense(payload, period = "30d") {
+  return requestJson("/workspace/finance/recurring-expenses", {
+    method: "POST",
+    body: {
+      ...payload,
+      period,
+    },
+  });
+}
+
+export async function removeRecurringFinanceExpense(expenseId, period = "30d") {
+  return requestJson(`/workspace/finance/recurring-expenses/${expenseId}?period=${period}`, {
+    method: "DELETE",
+  });
 }
 
 export async function getMercadoLivreInvoices(period = "30d") {
@@ -276,13 +329,28 @@ export async function getAdminIntegrationPanel() {
   return requestJson("/admin-console/integrations");
 }
 
-export async function updateAdminFeedbackStatus(feedbackId, status, note = "") {
+export async function updateAdminFeedbackStatus(feedbackId, status, noteOrOptions = "") {
+  const usingObjectPayload =
+    typeof noteOrOptions === "object" && noteOrOptions !== null;
+  const options = usingObjectPayload ? noteOrOptions : { note: noteOrOptions };
+  const body = {
+    status,
+    note: options.note || "",
+  };
+
+  if (usingObjectPayload) {
+    if (Object.prototype.hasOwnProperty.call(options, "response")) {
+      body.response = options.response || "";
+    }
+
+    if (Object.prototype.hasOwnProperty.call(options, "resolutionEta")) {
+      body.resolutionEta = options.resolutionEta || null;
+    }
+  }
+
   return requestJson(`/admin/feedback/${feedbackId}/status`, {
     method: "POST",
-    body: {
-      status,
-      note,
-    },
+    body,
   });
 }
 
@@ -400,4 +468,45 @@ export async function syncMercadoLivreQuestions(filters = {}) {
     method: "POST",
     body: filters,
   });
+}
+
+export async function refreshMercadoLivreIntegrationToken() {
+  return requestJson("/integrations/mercadolivre/refresh", {
+    method: "POST",
+  });
+}
+
+export async function disconnectMercadoLivreIntegration() {
+  return requestJson("/integrations/mercadolivre/disconnect", {
+    method: "POST",
+  });
+}
+
+export async function syncMercadoLivreOrders(payload = {}) {
+  return requestJson("/integrations/mercadolivre/sync/orders", {
+    method: "POST",
+    body: payload,
+  });
+}
+
+export async function syncMercadoLivreItems(payload = {}) {
+  return requestJson("/integrations/mercadolivre/sync/items", {
+    method: "POST",
+    body: payload,
+  });
+}
+
+export async function syncMercadoLivreAll(payload = {}) {
+  return requestJson("/integrations/mercadolivre/sync/all", {
+    method: "POST",
+    body: payload,
+  });
+}
+
+export async function getMercadoLivreOrders(params = {}) {
+  return requestJson(`/integrations/mercadolivre/orders${buildQueryString(params)}`);
+}
+
+export async function getMercadoLivreItems(params = {}) {
+  return requestJson(`/integrations/mercadolivre/items${buildQueryString(params)}`);
 }

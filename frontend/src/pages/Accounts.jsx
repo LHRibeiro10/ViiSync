@@ -14,7 +14,7 @@ function Accounts() {
       try {
         const result = await getAccounts();
         setAccounts(result);
-      } catch (err) {
+      } catch {
         setError("Não foi possível carregar as contas.");
       } finally {
         setLoading(false);

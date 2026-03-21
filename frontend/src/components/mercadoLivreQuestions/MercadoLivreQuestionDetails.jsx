@@ -79,7 +79,7 @@ function MercadoLivreQuestionDetails({
           <strong>Selecione uma pergunta para abrir o painel de detalhes.</strong>
           <p>
             Aqui voce consegue analisar o contexto da pergunta, copiar o texto e
-            responder pelo mock local.
+            responder direto no fluxo operacional.
           </p>
         </div>
       </section>
@@ -193,7 +193,7 @@ function MercadoLivreQuestionDetails({
             <h3>{question.isAnswered ? "Resposta concluida" : "Responder pergunta"}</h3>
             <p>
               {question.isAnswered
-                ? "No mock atual a pergunta ja esta encerrada."
+                ? "A pergunta ja esta encerrada."
                 : "Monte a resposta e atualize o status imediatamente."}
             </p>
           </div>
@@ -225,7 +225,7 @@ function MercadoLivreQuestionDetails({
           <div className="ml-questions-reply-actions">
             <span className="ml-questions-helper-copy">
               {question.isAnswered
-                ? "Pergunta encerrada no mock local."
+                ? "Pergunta encerrada."
                 : "Respostas claras e objetivas tendem a manter a conversao do anuncio."}
             </span>
 

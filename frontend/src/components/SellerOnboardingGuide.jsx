@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
+import { startSellerOnboardingGuide } from "../utils/sellerOnboardingGuide";
 import "./SellerOnboardingGuide.css";
 
 const STORAGE_KEY = "viisync-seller-onboarding";
@@ -129,15 +130,6 @@ function persistStoredState(nextState) {
   dispatchOnboardingEvent();
 }
 
-function clearStoredState() {
-  if (typeof window === "undefined") {
-    return;
-  }
-
-  window.localStorage.removeItem(STORAGE_KEY);
-  dispatchOnboardingEvent();
-}
-
 function resolveStepIndex(stepId) {
   const index = TOUR_STEPS.findIndex((step) => step.id === stepId);
   return index >= 0 ? index : 0;
@@ -189,25 +181,15 @@ function SellerOnboardingGuide() {
     };
   }, []);
 
-  useEffect(() => {
-    if (!hasHydrated || mode !== "tour") {
-      return;
-    }
+  const locationStepIndex =
+    mode === "tour"
+      ? TOUR_STEPS.findIndex((step) => step.path === location.pathname)
+      : -1;
+  const effectiveStepIndex = locationStepIndex >= 0 ? locationStepIndex : activeStepIndex;
 
-    const matchedIndex = TOUR_STEPS.findIndex((step) => step.path === location.pathname);
-
-    if (matchedIndex >= 0 && matchedIndex !== activeStepIndex) {
-      setActiveStepIndex(matchedIndex);
-      persistStoredState({
-        status: "active",
-        stepId: TOUR_STEPS[matchedIndex].id,
-      });
-    }
-  }, [activeStepIndex, hasHydrated, location.pathname, mode]);
-
-  const currentStep = TOUR_STEPS[activeStepIndex] || TOUR_STEPS[0];
+  const currentStep = TOUR_STEPS[effectiveStepIndex] || TOUR_STEPS[0];
   const totalSteps = TOUR_STEPS.length;
-  const progressPercent = ((activeStepIndex + 1) / totalSteps) * 100;
+  const progressPercent = ((effectiveStepIndex + 1) / totalSteps) * 100;
 
   const promptPreview = useMemo(() => {
     return TOUR_STEPS.slice(0, 4).map((step) => step.section);
@@ -319,7 +301,7 @@ function SellerOnboardingGuide() {
 
           <div className="seller-tour-copy">
             <span className="seller-tour-step">
-              Etapa {activeStepIndex + 1} de {totalSteps} | {currentStep.section}
+              Etapa {effectiveStepIndex + 1} de {totalSteps} | {currentStep.section}
             </span>
             <h3>{currentStep.title}</h3>
             <p>{currentStep.description}</p>
@@ -338,12 +320,12 @@ function SellerOnboardingGuide() {
               type="button"
               className="seller-tour-secondary"
               onClick={() => handleMoveToStep(activeStepIndex - 1)}
-              disabled={activeStepIndex === 0}
+              disabled={effectiveStepIndex === 0}
             >
               Voltar
             </button>
 
-            {activeStepIndex === totalSteps - 1 ? (
+            {effectiveStepIndex === totalSteps - 1 ? (
               <button
                 type="button"
                 className="seller-tour-primary"
@@ -355,7 +337,7 @@ function SellerOnboardingGuide() {
               <button
                 type="button"
                 className="seller-tour-primary"
-                onClick={() => handleMoveToStep(activeStepIndex + 1)}
+                onClick={() => handleMoveToStep(effectiveStepIndex + 1)}
               >
                 Proxima etapa
               </button>
@@ -365,17 +347,6 @@ function SellerOnboardingGuide() {
       ) : null}
     </>
   );
-}
-
-export function startSellerOnboardingGuide() {
-  persistStoredState({
-    status: "active",
-    stepId: TOUR_STEPS[0].id,
-  });
-}
-
-export function resetSellerOnboardingGuide() {
-  clearStoredState();
 }
 
 export default SellerOnboardingGuide;

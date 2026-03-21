@@ -158,7 +158,7 @@
   align-items: center;
   justify-content: center;
   min-height: 44px;
-  margin-bottom: 14px;
+  margin-bottom: 0;
   padding: 0 14px;
   border-radius: 14px;
   border: 1px solid var(--input-border);
@@ -172,6 +172,10 @@
 .settings-inline-link:hover {
   background: var(--surface-4);
   box-shadow: var(--interactive-shadow-hover);
+}
+
+.settings-actions .settings-inline-link {
+  flex: 1;
 }
 
 .settings-placeholder {

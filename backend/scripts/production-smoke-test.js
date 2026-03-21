@@ -32,8 +32,49 @@ async function checkRoot(baseUrl) {
   console.log("OK  GET /");
 }
 
-async function checkMercadoLivreStatus(baseUrl, expectUsingLive) {
-  const result = await requestJson(baseUrl, "/integrations/mercadolivre/status");
+function buildHeaders(token, extraHeaders = {}) {
+  return {
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    ...extraHeaders,
+  };
+}
+
+async function resolveSmokeSessionToken(baseUrl) {
+  const explicitToken = String(process.env.SMOKE_BEARER_TOKEN || "").trim();
+  if (explicitToken) {
+    return explicitToken;
+  }
+
+  const email = String(process.env.SMOKE_EMAIL || "").trim();
+  const password = String(process.env.SMOKE_PASSWORD || "").trim();
+
+  if (!email || !password) {
+    throw new Error(
+      "Defina SMOKE_BEARER_TOKEN ou informe SMOKE_EMAIL e SMOKE_PASSWORD."
+    );
+  }
+
+  const loginResult = await requestJson(baseUrl, "/auth/login", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email, password, rememberMe: false }),
+  });
+
+  assertCondition(
+    loginResult.ok,
+    `POST /auth/login falhou com status ${loginResult.status}`
+  );
+
+  const token = loginResult.payload?.session?.token;
+  assertCondition(token, "Login do smoke nao retornou token de sessao.");
+
+  return token;
+}
+
+async function checkMercadoLivreStatus(baseUrl, token, expectUsingLive) {
+  const result = await requestJson(baseUrl, "/integrations/mercadolivre/status", {
+    headers: buildHeaders(token),
+  });
   assertCondition(
     result.ok,
     `GET /integrations/mercadolivre/status falhou com status ${result.status}`
@@ -49,17 +90,19 @@ async function checkMercadoLivreStatus(baseUrl, expectUsingLive) {
   console.log("OK  GET /integrations/mercadolivre/status");
 }
 
-async function checkQuestions(baseUrl, expectRealSource) {
-  const result = await requestJson(baseUrl, "/integrations/mercadolivre/questions");
+async function checkQuestions(baseUrl, token, expectedSource) {
+  const result = await requestJson(baseUrl, "/integrations/mercadolivre/questions", {
+    headers: buildHeaders(token),
+  });
   assertCondition(
     result.ok,
     `GET /integrations/mercadolivre/questions falhou com status ${result.status}`
   );
 
-  if (expectRealSource) {
+  if (expectedSource) {
     assertCondition(
-      result.payload?.meta?.source === "mercado-livre-api",
-      "A origem das perguntas nao indica API real (meta.source esperado: mercado-livre-api)."
+      result.payload?.meta?.source === expectedSource,
+      `A origem das perguntas nao bate com o contrato esperado (meta.source esperado: ${expectedSource}).`
     );
   }
 
@@ -67,7 +110,7 @@ async function checkQuestions(baseUrl, expectRealSource) {
   return result.payload;
 }
 
-async function checkReply(baseUrl, questionsPayload) {
+async function checkReply(baseUrl, token, questionsPayload) {
   const explicitQuestionId = String(process.env.MERCADOLIVRE_TEST_QUESTION_ID || "").trim();
   const fallbackQuestion =
     questionsPayload?.items?.find((item) => !item.isAnswered) || null;
@@ -83,7 +126,7 @@ async function checkReply(baseUrl, questionsPayload) {
     `/integrations/mercadolivre/questions/${questionId}/reply`,
     {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: buildHeaders(token, { "Content-Type": "application/json" }),
       body: JSON.stringify({
         text: `Resposta automatica de smoke test ${new Date().toISOString()}`,
       }),
@@ -109,15 +152,16 @@ async function main() {
   );
 
   const expectUsingLive = toBoolean(process.env.EXPECT_USING_LIVE, true);
-  const expectRealSource = toBoolean(process.env.EXPECT_REAL_SOURCE, true);
+  const expectedSource = String(process.env.EXPECT_SOURCE || "database").trim();
   const enableReplyTest = toBoolean(process.env.ENABLE_REPLY_TEST, false);
 
   await checkRoot(baseUrl);
-  await checkMercadoLivreStatus(baseUrl, expectUsingLive);
-  const questionsPayload = await checkQuestions(baseUrl, expectRealSource);
+  const token = await resolveSmokeSessionToken(baseUrl);
+  await checkMercadoLivreStatus(baseUrl, token, expectUsingLive);
+  const questionsPayload = await checkQuestions(baseUrl, token, expectedSource);
 
   if (enableReplyTest) {
-    await checkReply(baseUrl, questionsPayload);
+    await checkReply(baseUrl, token, questionsPayload);
   } else {
     console.log(
       "SKIP POST /integrations/mercadolivre/questions/:id/reply (defina ENABLE_REPLY_TEST=true para executar)"

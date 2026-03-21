@@ -1,4 +1,5 @@
 const express = require("express");
+const { requireAdmin, requireAuth } = require("../auth/auth.middleware");
 
 const {
   fetchAdminIntegrations,
@@ -9,6 +10,8 @@ const {
 } = require("./adminConsole.controller");
 
 const router = express.Router();
+
+router.use(requireAuth, requireAdmin);
 
 router.get("/observability", fetchObservability);
 router.get("/users", fetchAdminUsers);

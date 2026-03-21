@@ -1,9 +1,11 @@
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { registerUser, setSessionToken } from "../services/api";
+import { registerUser } from "../services/api";
+import { useAuthSession } from "../contexts/useAuthSession";
 
 function Register() {
   const navigate = useNavigate();
+  const { applySessionToken } = useAuthSession();
   const [formData, setFormData] = useState({
     name: "",
     company: "",
@@ -80,14 +82,14 @@ function Register() {
         throw new Error("Sessao nao recebida no cadastro.");
       }
 
-      setSessionToken(token);
+      await applySessionToken(token);
       setFeedback({
         tone: "success",
         message: "Conta criada com sucesso. Redirecionando...",
       });
 
       window.setTimeout(() => {
-        navigate("/");
+        navigate("/", { replace: true });
       }, 350);
     } catch (error) {
       setFeedback({

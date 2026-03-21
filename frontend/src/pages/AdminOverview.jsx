@@ -1,7 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { adminConsoleMock } from "../data/adminConsoleMock";
-import { getAdminFeedbacks } from "../services/api";
+import {
+  getAdminFeedbacks,
+  getAdminIntegrationPanel,
+  getAdminObservability,
+  getAdminUsers,
+} from "../services/api";
 import "./AdminOverview.css";
 
 function formatDateTime(value) {
@@ -27,27 +31,64 @@ function getStatusToneClass(value) {
 
 function AdminOverview() {
   const [feedbackPayload, setFeedbackPayload] = useState(null);
+  const [observabilityPayload, setObservabilityPayload] = useState(null);
+  const [usersPayload, setUsersPayload] = useState(null);
+  const [integrationPayload, setIntegrationPayload] = useState(null);
   const [feedbackError, setFeedbackError] = useState("");
+  const [overviewError, setOverviewError] = useState("");
+  const [generatedAt, setGeneratedAt] = useState(new Date().toISOString());
 
   useEffect(() => {
     let isCancelled = false;
 
-    async function loadFeedbackInbox() {
+    async function loadOverview() {
       try {
         setFeedbackError("");
-        const response = await getAdminFeedbacks();
+        setOverviewError("");
 
-        if (!isCancelled) {
-          setFeedbackPayload(response);
+        const [feedbackResponse, observabilityResponse, usersResponse, integrationsResponse] =
+          await Promise.all([
+            getAdminFeedbacks().catch(() => null),
+            getAdminObservability().catch(() => null),
+            getAdminUsers().catch(() => null),
+            getAdminIntegrationPanel().catch(() => null),
+          ]);
+
+        if (isCancelled) {
+          return;
         }
-      } catch (err) {
+
+        if (feedbackResponse) {
+          setFeedbackPayload(feedbackResponse);
+        } else {
+          setFeedbackError("Nao foi possivel carregar a fila de reclamacoes agora.");
+        }
+
+        if (observabilityResponse) {
+          setObservabilityPayload(observabilityResponse);
+        }
+
+        if (usersResponse) {
+          setUsersPayload(usersResponse);
+        }
+
+        if (integrationsResponse) {
+          setIntegrationPayload(integrationsResponse);
+        }
+
+        if (!observabilityResponse && !usersResponse && !integrationsResponse) {
+          setOverviewError("Nao foi possivel carregar os indicadores administrativos.");
+        }
+
+        setGeneratedAt(new Date().toISOString());
+      } catch {
         if (!isCancelled) {
-          setFeedbackError("Usando fila estatica enquanto a inbox nao responde.");
+          setOverviewError("Nao foi possivel carregar o resumo administrativo.");
         }
       }
     }
 
-    loadFeedbackInbox();
+    loadOverview();
 
     return () => {
       isCancelled = true;
@@ -55,48 +96,96 @@ function AdminOverview() {
   }, []);
 
   const summaryCards = useMemo(() => {
-    return adminConsoleMock.summary.map((card) => {
-      if (card.id !== "open-tickets") {
-        return card;
-      }
+    const openTickets = feedbackPayload?.meta?.openCount || 0;
+    const activeUsers = usersPayload?.summary?.total || 0;
+    const suspendedUsers = usersPayload?.summary?.blockedCount || 0;
+    const integrationIssues =
+      integrationPayload?.marketplaces?.reduce(
+        (sum, item) => sum + Number(item.accountsWithIssues || 0),
+        0
+      ) || 0;
 
-      if (!feedbackPayload?.meta) {
-        return card;
-      }
-
-      return {
-        ...card,
-        value: String(feedbackPayload.meta.openCount),
-        trend: `${feedbackPayload.meta.highPriorityCount} com prioridade alta`,
-      };
-    });
-  }, [feedbackPayload]);
+    return [
+      {
+        id: "open-tickets",
+        label: "Tickets abertos",
+        value: String(openTickets),
+        trend: `${feedbackPayload?.meta?.highPriorityCount || 0} com prioridade alta`,
+        tone: openTickets > 0 ? "warning" : "success",
+      },
+      {
+        id: "active-users",
+        label: "Usuarios monitorados",
+        value: String(activeUsers),
+        trend: `${suspendedUsers} conta(s) suspensa(s)`,
+        tone: suspendedUsers > 0 ? "warning" : "success",
+      },
+      {
+        id: "integration-issues",
+        label: "Pendencias de integracao",
+        value: String(integrationIssues),
+        trend: `${integrationPayload?.summary?.find((item) => item.id === "integration-expiring-tokens")?.value || 0} token(s) expirando`,
+        tone: integrationIssues > 0 ? "warning" : "success",
+      },
+      {
+        id: "active-sessions",
+        label: "Sessoes ativas",
+        value:
+          observabilityPayload?.summary?.find((item) => item.id === "obs-active-sessions")
+            ?.value || "0",
+        trend: "Leitura operacional em tempo real",
+        tone: "neutral",
+      },
+    ];
+  }, [feedbackPayload, integrationPayload, observabilityPayload, usersPayload]);
 
   const complaintFeed = useMemo(() => {
-    if (feedbackPayload?.items?.length) {
-      return feedbackPayload.items.slice(0, 4).map((item) => ({
-        id: item.id,
-        priorityLabel: item.priorityLabel,
-        priorityTone: item.priorityTone,
-        openedAt: item.createdAt,
-        topic: item.subject,
-        customer: item.submittedBy.company,
-        channel: item.typeLabel,
-        status: item.statusLabel,
-      }));
-    }
-
-    return adminConsoleMock.complaints.map((complaint) => ({
-      id: complaint.id,
-      priorityLabel: complaint.priority,
-      priorityTone: complaint.priority === "Alta" ? "danger" : "warning",
-      openedAt: complaint.openedAt,
-      topic: complaint.topic,
-      customer: complaint.customer,
-      channel: complaint.channel,
-      status: complaint.status,
+    return (feedbackPayload?.items || []).slice(0, 4).map((item) => ({
+      id: item.id,
+      priorityLabel: item.priorityLabel,
+      priorityTone: item.priorityTone,
+      openedAt: item.createdAt,
+      topic: item.subject,
+      customer: item.submittedBy.company,
+      channel: item.typeLabel,
+      status: item.statusLabel,
     }));
   }, [feedbackPayload]);
+
+  const services = observabilityPayload?.services || [];
+  const actionItems = [
+    {
+      id: "action-feedback",
+      due: "Agora",
+      title: `${feedbackPayload?.meta?.highPriorityCount || 0} ticket(s) de alta prioridade`,
+      owner: "Suporte",
+      tone: (feedbackPayload?.meta?.highPriorityCount || 0) > 0 ? "warning" : "success",
+    },
+    {
+      id: "action-blocked-users",
+      due: "Hoje",
+      title: `${usersPayload?.summary?.blockedCount || 0} conta(s) suspensa(s)`,
+      owner: "Risco",
+      tone: (usersPayload?.summary?.blockedCount || 0) > 0 ? "warning" : "success",
+    },
+    {
+      id: "action-integrations",
+      due: "Hoje",
+      title: `${integrationPayload?.summary?.find((item) => item.id === "integration-issues")?.value || 0} pendencia(s) em integracoes`,
+      owner: "Integracoes",
+      tone:
+        Number(
+          integrationPayload?.summary?.find((item) => item.id === "integration-issues")
+            ?.value || 0
+        ) > 0
+          ? "warning"
+          : "success",
+    },
+  ];
+
+  const incidents = observabilityPayload?.incidents || [];
+  const recentErrors = observabilityPayload?.routeFailures || [];
+  const integrations = integrationPayload?.marketplaces || [];
 
   return (
     <div className="admin-overview-page">
@@ -113,14 +202,16 @@ function AdminOverview() {
         <div className="admin-overview-hero-meta">
           <div className="admin-overview-chip">
             <span>Ambiente</span>
-            <strong>{adminConsoleMock.environment}</strong>
+            <strong>{import.meta.env.MODE || "production"}</strong>
           </div>
           <div className="admin-overview-chip">
             <span>Ultima atualizacao</span>
-            <strong>{formatDateTime(adminConsoleMock.generatedAt)}</strong>
+            <strong>{formatDateTime(generatedAt)}</strong>
           </div>
         </div>
       </header>
+
+      {overviewError ? <div className="admin-inline-note">{overviewError}</div> : null}
 
       <section className="admin-summary-grid">
         {summaryCards.map((card) => (
@@ -145,16 +236,12 @@ function AdminOverview() {
           </div>
 
           <div className="admin-service-grid">
-            {adminConsoleMock.services.map((service) => (
+            {services.map((service) => (
               <article key={service.id} className="admin-service-card">
                 <div className="admin-service-top">
                   <strong>{service.name}</strong>
-                  <span className={`admin-status-badge ${getStatusToneClass(service.status)}`}>
-                    {service.status === "healthy"
-                      ? "Saudavel"
-                      : service.status === "degraded"
-                        ? "Degradado"
-                        : "Atencao"}
+                  <span className={`admin-status-badge ${getStatusToneClass("success")}`}>
+                    Estavel
                   </span>
                 </div>
                 <div className="admin-service-metrics">
@@ -163,8 +250,8 @@ function AdminOverview() {
                     <strong>{service.latency}</strong>
                   </div>
                   <div>
-                    <span>Uptime</span>
-                    <strong>{service.uptime}</strong>
+                    <span>Erro</span>
+                    <strong>{service.errorRate}</strong>
                   </div>
                 </div>
                 <p>{service.note}</p>
@@ -182,7 +269,7 @@ function AdminOverview() {
           </div>
 
           <div className="admin-action-list">
-            {adminConsoleMock.actionItems.map((action) => (
+            {actionItems.map((action) => (
               <article key={action.id} className="admin-action-card">
                 <span className={`admin-status-badge ${getStatusToneClass(action.tone)}`}>
                   {action.due}
@@ -203,19 +290,19 @@ function AdminOverview() {
           </div>
 
           <div className="admin-feed-list">
-            {adminConsoleMock.incidents.map((incident) => (
+            {incidents.map((incident) => (
               <article key={incident.id} className="admin-feed-card">
                 <div className="admin-feed-topline">
                   <span className={`admin-status-badge ${getStatusToneClass(incident.severity)}`}>
-                    {incident.status}
+                    {incident.severity === "warning" ? "Atencao" : "Estavel"}
                   </span>
-                  <small>{formatDateTime(incident.startedAt)}</small>
+                  <small>{formatDateTime(incident.openedAt)}</small>
                 </div>
                 <strong>{incident.title}</strong>
-                <p>{incident.impact}</p>
+                <p>Monitorado pelo time interno</p>
                 <div className="admin-feed-meta">
                   <span>{incident.id}</span>
-                  <span>{incident.owner}</span>
+                  <span>Operacao interna</span>
                 </div>
               </article>
             ))}
@@ -266,23 +353,19 @@ function AdminOverview() {
           </div>
 
           <div className="admin-error-list">
-            {adminConsoleMock.recentErrors.map((error) => (
-              <article key={error.id} className="admin-error-card">
+            {recentErrors.map((item) => (
+              <article key={item.id} className="admin-error-card">
                 <div className="admin-feed-topline">
-                  <span
-                    className={`admin-status-badge ${
-                      error.level === "error" ? "is-danger" : "is-warning"
-                    }`}
-                  >
-                    {error.count} ocorrencias
+                  <span className="admin-status-badge is-warning">
+                    {item.failures} ocorrencias
                   </span>
-                  <small>{formatDateTime(error.lastSeenAt)}</small>
+                  <small>{item.latencyP95}</small>
                 </div>
-                <strong>{error.source}</strong>
-                <p>{error.note}</p>
+                <strong>{item.route}</strong>
+                <p>Owner: {item.owner}</p>
                 <div className="admin-feed-meta">
-                  <span>{error.id}</span>
-                  <span>{error.level}</span>
+                  <span>{item.id}</span>
+                  <span>route-monitor</span>
                 </div>
               </article>
             ))}
@@ -298,7 +381,7 @@ function AdminOverview() {
           </div>
 
           <div className="admin-integration-list">
-            {adminConsoleMock.integrations.map((integration) => (
+            {integrations.map((integration) => (
               <article key={integration.id} className="admin-integration-card">
                 <div className="admin-service-top">
                   <strong>{integration.name}</strong>
@@ -307,12 +390,12 @@ function AdminOverview() {
                       integration.status
                     )}`}
                   >
-                    {integration.status === "healthy" ? "Estavel" : "Atencao"}
+                    {integration.status === "success" ? "Estavel" : "Atencao"}
                   </span>
                 </div>
                 <div className="admin-integration-metrics">
                   <span>{integration.accountsWithIssues} conta(s) com problema</span>
-                  <span>{integration.queueBacklog} eventos na fila</span>
+                  <span>{integration.tokenExpiring} token(s) expirando</span>
                 </div>
                 <p>{integration.note}</p>
               </article>

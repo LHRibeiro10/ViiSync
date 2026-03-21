@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import PageHeader from "../components/PageHeader";
-import { useAnalyticsPeriod } from "../contexts/AnalyticsPeriodContext";
+import { useAnalyticsPeriod } from "../contexts/useAnalyticsPeriod";
 import { getSellerAlerts } from "../services/api";
 import { formatFeedbackDateTime } from "../utils/feedback";
 import "./Alerts.css";
@@ -26,7 +26,7 @@ function Alerts() {
 
       const response = await getSellerAlerts(selectedPeriod);
       setPayload(response);
-    } catch (err) {
+    } catch {
       setError("Nao foi possivel carregar os alertas agora.");
     } finally {
       setLoading(false);

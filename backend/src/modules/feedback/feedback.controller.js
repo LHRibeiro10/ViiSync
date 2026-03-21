@@ -31,25 +31,25 @@ async function postSellerFeedback(req, res) {
   }
 }
 
-function fetchAdminFeedback(req, res) {
+async function fetchAdminFeedback(req, res) {
   try {
-    res.json(listAdminFeedback(req.query));
+    res.json(await listAdminFeedback(req.query));
   } catch (error) {
     sendError(res, error, "Nao foi possivel carregar a inbox administrativa.");
   }
 }
 
-function fetchAdminFeedbackById(req, res) {
+async function fetchAdminFeedbackById(req, res) {
   try {
-    res.json(getAdminFeedbackById(req.params.feedbackId));
+    res.json(await getAdminFeedbackById(req.params.feedbackId));
   } catch (error) {
     sendError(res, error, "Nao foi possivel carregar o feedback solicitado.");
   }
 }
 
-function postAdminFeedbackStatus(req, res) {
+async function postAdminFeedbackStatus(req, res) {
   try {
-    res.json(updateAdminFeedbackStatus(req.params.feedbackId, req.body));
+    res.json(await updateAdminFeedbackStatus(req.params.feedbackId, req.body));
   } catch (error) {
     sendError(res, error, "Nao foi possivel atualizar o status do feedback.");
   }

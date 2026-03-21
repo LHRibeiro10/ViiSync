@@ -1,27 +1,70 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { getSettings } from "../services/api";
 import PageHeader from "../components/PageHeader";
-import { startSellerOnboardingGuide } from "../components/SellerOnboardingGuide";
-import { useTheme } from "../contexts/ThemeContext";
+import { useAnalyticsPeriod } from "../contexts/useAnalyticsPeriod";
+import { useAuthSession } from "../contexts/useAuthSession";
+import { useTheme } from "../contexts/useTheme";
+import { startSellerOnboardingGuide } from "../utils/sellerOnboardingGuide";
 import "./Settings.css";
+
+const NOTIFICATIONS_STORAGE_KEY = "viisync-notifications-enabled";
+
+function resolveStoredNotifications() {
+  if (typeof window === "undefined") {
+    return true;
+  }
+
+  return window.localStorage.getItem(NOTIFICATIONS_STORAGE_KEY) !== "false";
+}
+
+function formatRole(role) {
+  const normalized = String(role || "").toUpperCase();
+
+  if (normalized === "ADMIN") {
+    return "Administrador";
+  }
+
+  if (normalized === "SUPPORT") {
+    return "Suporte";
+  }
+
+  return "Seller";
+}
+
+function formatStatus(status) {
+  const normalized = String(status || "").toUpperCase();
+
+  if (normalized === "ACTIVE") {
+    return "Ativa";
+  }
+
+  if (normalized === "SUSPENDED") {
+    return "Suspensa";
+  }
+
+  return "Pendente";
+}
 
 function Settings() {
   const navigate = useNavigate();
   const { theme, setTheme } = useTheme();
+  const { user, clearSession } = useAuthSession();
+  const { selectedPeriod, setSelectedPeriod } = useAnalyticsPeriod();
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [saving, setSaving] = useState(false);
-  const [savedMessage, setSavedMessage] = useState("");
-  const [selectedTheme, setSelectedTheme] = useState(theme);
+  const [feedbackMessage, setFeedbackMessage] = useState("");
+  const [notificationsEnabled, setNotificationsEnabled] = useState(
+    resolveStoredNotifications
+  );
 
   useEffect(() => {
     async function loadSettings() {
       try {
         const result = await getSettings();
         setData(result);
-      } catch (err) {
+      } catch {
         setError("Nao foi possivel carregar as configuracoes.");
       } finally {
         setLoading(false);
@@ -32,23 +75,37 @@ function Settings() {
   }, []);
 
   useEffect(() => {
-    setSelectedTheme(theme);
-  }, [theme]);
-
-  async function handleSave() {
-    try {
-      setSaving(true);
-      setSavedMessage("");
-      await new Promise((resolve) => setTimeout(resolve, 1000));
-      setSavedMessage("Alteracoes salvas com sucesso.");
-    } finally {
-      setSaving(false);
+    if (typeof window === "undefined") {
+      return;
     }
-  }
+
+    window.localStorage.setItem(
+      NOTIFICATIONS_STORAGE_KEY,
+      notificationsEnabled ? "true" : "false"
+    );
+  }, [notificationsEnabled]);
+
+  useEffect(() => {
+    if (!feedbackMessage) {
+      return undefined;
+    }
+
+    const timeoutId = window.setTimeout(() => setFeedbackMessage(""), 2400);
+    return () => window.clearTimeout(timeoutId);
+  }, [feedbackMessage]);
+
+  const roleLabel = useMemo(() => formatRole(user?.role), [user?.role]);
+  const statusLabel = useMemo(() => formatStatus(user?.status), [user?.status]);
+  const isAdmin = String(user?.role || "").toUpperCase() === "ADMIN";
 
   function handleRestartTutorial() {
     startSellerOnboardingGuide();
     navigate("/");
+  }
+
+  async function handleLogout() {
+    await clearSession();
+    navigate("/login", { replace: true });
   }
 
   if (loading) return <div className="screen-message">Carregando configuracoes...</div>;
@@ -60,32 +117,28 @@ function Settings() {
       <PageHeader
         tag="Conta"
         title="Configuracoes"
-        description="Gerencie dados da conta, preferencias e seguranca."
-      >
-        <button onClick={handleSave}>
-          {saving ? "Salvando..." : "Salvar alteracoes"}
-        </button>
-      </PageHeader>
+        description="Gerencie preferencias reais da sua conta e acesse rapidamente integracoes e chamados."
+      />
 
-      {savedMessage ? <div className="settings-success">{savedMessage}</div> : null}
+      {feedbackMessage ? <div className="settings-success">{feedbackMessage}</div> : null}
 
       <div className="settings-grid">
         <section className="settings-card">
-          <h2>Perfil</h2>
+          <h2>Perfil da conta</h2>
 
-          <div className="settings-field">
-            <label>Nome</label>
-            <input type="text" defaultValue={data.profile.name} />
+          <div className="settings-info-row">
+            <span>Nome</span>
+            <strong>{data.profile.name}</strong>
           </div>
 
-          <div className="settings-field">
-            <label>E-mail</label>
-            <input type="email" defaultValue={data.profile.email} />
+          <div className="settings-info-row">
+            <span>E-mail</span>
+            <strong>{data.profile.email}</strong>
           </div>
 
-          <div className="settings-field">
-            <label>Empresa</label>
-            <input type="text" defaultValue={data.profile.company} />
+          <div className="settings-info-row">
+            <span>Empresa</span>
+            <strong>{data.profile.company}</strong>
           </div>
         </section>
 
@@ -95,11 +148,10 @@ function Settings() {
           <div className="settings-field">
             <label>Tema</label>
             <select
-              value={selectedTheme}
+              value={theme}
               onChange={(event) => {
-                const nextTheme = event.target.value;
-                setSelectedTheme(nextTheme);
-                setTheme(nextTheme);
+                setTheme(event.target.value);
+                setFeedbackMessage("Tema atualizado.");
               }}
             >
               <option value="light">Claro</option>
@@ -108,29 +160,54 @@ function Settings() {
           </div>
 
           <div className="settings-field">
-            <label>Periodo padrao</label>
-            <select defaultValue={data.preferences.periodDefault}>
-              <option>7 dias</option>
-              <option>30 dias</option>
-              <option>90 dias</option>
+            <label>Periodo padrao de analise</label>
+            <select
+              value={selectedPeriod}
+              onChange={(event) => {
+                setSelectedPeriod(event.target.value);
+                setFeedbackMessage("Periodo padrao atualizado.");
+              }}
+            >
+              <option value="7d">7 dias</option>
+              <option value="30d">30 dias</option>
+              <option value="90d">90 dias</option>
             </select>
           </div>
 
           <div className="settings-field">
-            <label>Notificacoes</label>
-            <select defaultValue={data.preferences.notifications}>
-              <option>Ativadas</option>
-              <option>Desativadas</option>
+            <label>Notificacoes no navegador</label>
+            <select
+              value={notificationsEnabled ? "enabled" : "disabled"}
+              onChange={(event) => {
+                const enabled = event.target.value === "enabled";
+                setNotificationsEnabled(enabled);
+                setFeedbackMessage(
+                  enabled ? "Notificacoes ativadas." : "Notificacoes desativadas."
+                );
+              }}
+            >
+              <option value="enabled">Ativadas</option>
+              <option value="disabled">Desativadas</option>
             </select>
           </div>
         </section>
 
         <section className="settings-card">
-          <h2>Seguranca</h2>
+          <h2>Seguranca e acesso</h2>
+
+          <div className="settings-info-row">
+            <span>Perfil</span>
+            <strong>{roleLabel}</strong>
+          </div>
+
+          <div className="settings-info-row">
+            <span>Status da conta</span>
+            <strong>{statusLabel}</strong>
+          </div>
 
           <div className="settings-info-row">
             <span>Ultima troca de senha</span>
-            <strong>{data.security.lastPasswordChange}</strong>
+            <strong>{data.security.lastPasswordChange || "Nao informado"}</strong>
           </div>
 
           <div className="settings-info-row">
@@ -139,55 +216,47 @@ function Settings() {
           </div>
 
           <div className="settings-actions">
-            <button className="primary">Alterar senha</button>
-            <button className="secondary">Ativar 2FA</button>
-          </div>
-        </section>
-
-        <section className="settings-card">
-          <h2>Ajuda inicial</h2>
-          <p className="settings-muted">
-            Se quiser rever a exploracao guiada do ViiSync, reinicie o tutorial e
-            o sistema vai voltar ao passo inicial do onboarding.
-          </p>
-
-          <div className="settings-actions settings-actions-single">
-            <button className="primary" onClick={handleRestartTutorial}>
-              Ver tutorial novamente
+            <button className="secondary" type="button" onClick={handleLogout}>
+              Sair da conta
             </button>
           </div>
         </section>
 
         <section className="settings-card">
-          <h2>Integracoes futuras</h2>
+          <h2>Area do usuario</h2>
           <p className="settings-muted">
-            Aqui vamos centralizar configuracoes de Mercado Livre, Shopee, emissao
-            de notas e billing.
+            Central de operacao para conectar o Mercado Livre e abrir chamados com o
+            time de suporte/produto.
           </p>
 
-          <Link to="/integracoes" className="settings-inline-link">
-            Abrir hub de integracoes
-          </Link>
-
-          <div className="settings-placeholder">
-            <div>
-              <strong>Mercado Livre</strong>
-              <p>Em breve</p>
-            </div>
+          <div className="settings-actions">
+            <Link to="/usuario?tab=integracoes" className="settings-inline-link">
+              Abrir integracoes
+            </Link>
+            <Link to="/usuario?tab=feedback" className="settings-inline-link">
+              Abrir feedback
+            </Link>
           </div>
 
-          <div className="settings-placeholder">
-            <div>
-              <strong>Shopee</strong>
-              <p>Em breve</p>
+          {isAdmin ? (
+            <div className="settings-actions settings-actions-single">
+              <Link to="/admin/reclamacoes" className="settings-inline-link">
+                Abrir inbox admin
+              </Link>
             </div>
-          </div>
+          ) : null}
+        </section>
 
-          <div className="settings-placeholder">
-            <div>
-              <strong>Emissao fiscal</strong>
-              <p>Em breve</p>
-            </div>
+        <section className="settings-card">
+          <h2>Ajuda inicial</h2>
+          <p className="settings-muted">
+            Reinicie o tutorial guiado caso queira rever os passos principais do ViiSync.
+          </p>
+
+          <div className="settings-actions settings-actions-single">
+            <button className="primary" type="button" onClick={handleRestartTutorial}>
+              Ver tutorial novamente
+            </button>
           </div>
         </section>
       </div>

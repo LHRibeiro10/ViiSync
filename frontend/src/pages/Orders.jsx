@@ -18,7 +18,7 @@ function Orders() {
       try {
         const result = await getOrders();
         setOrders(result);
-      } catch (err) {
+      } catch {
         setError("Nao foi possivel carregar os pedidos.");
       } finally {
         setLoading(false);

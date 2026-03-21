@@ -1,619 +1,744 @@
-const { createHmac, randomUUID, timingSafeEqual } = require("crypto");
-const prisma = require("../../lib/prisma");
-
+const DEFAULT_MODE = "auto";
+const VALID_MODES = new Set(["mock", "auto", "live"]);
 const DEFAULT_API_BASE_URL = "https://api.mercadolibre.com";
 const DEFAULT_AUTH_BASE_URL = "https://auth.mercadolivre.com.br/authorization";
+const DEFAULT_OAUTH_TOKEN_URL = "https://api.mercadolibre.com/oauth/token";
+const DEFAULT_TIMEOUT_MS = 20000;
 
-const dismissedIds = new Set();
-const webhookEvents = [];
-let runtimeOAuth = null;
-let runtimeOAuthLoadedFromDb = false;
-let lastSyncAt = null;
-const OAUTH_STATE_TTL_MS = 10 * 60 * 1000;
-const OAUTH_STATE_MAX_CLOCK_SKEW_MS = 60 * 1000;
-const DEFAULT_OAUTH_STATE_SECRET = "viisync-mercadolivre-oauth-state";
+class MercadoLivreLiveServiceError extends Error {
+  constructor(message, status = 500, payload = null) {
+    super(message);
+    this.name = "MercadoLivreLiveServiceError";
+    this.status = status;
+    this.payload = payload;
+  }
+}
 
-function env(name, fallbackValue = "") {
-  const value = process.env[name];
+function normalizeText(value) {
+  return String(value || "").trim();
+}
 
-  if (value === undefined || value === null) {
-    return fallbackValue;
+function normalizeMode(value) {
+  const normalized = normalizeText(value).toLowerCase();
+
+  if (VALID_MODES.has(normalized)) {
+    return normalized;
   }
 
-  return String(value).trim();
+  return DEFAULT_MODE;
 }
 
 function mode() {
-  const current = env("MERCADOLIVRE_API_MODE", "auto").toLowerCase();
-  if (current === "live" || current === "mock" || current === "auto") return current;
-  return "auto";
+  return normalizeMode(process.env.MERCADOLIVRE_API_MODE);
 }
 
-function apiBaseUrl() {
-  return env("MERCADOLIVRE_API_BASE_URL", DEFAULT_API_BASE_URL);
-}
-
-function mercadoLivreAccountFilter() {
+function getConfig() {
   return {
-    OR: [
-      { marketplace: { contains: "mercado livre", mode: "insensitive" } },
-      { marketplace: { contains: "mercadolivre", mode: "insensitive" } },
-      { marketplace: { contains: "mercado", mode: "insensitive" } },
-    ],
+    mode: mode(),
+    apiBaseUrl: normalizeText(process.env.MERCADOLIVRE_API_BASE_URL) || DEFAULT_API_BASE_URL,
+    authBaseUrl:
+      normalizeText(process.env.MERCADOLIVRE_AUTH_BASE_URL) || DEFAULT_AUTH_BASE_URL,
+    oauthTokenUrl:
+      normalizeText(process.env.MERCADOLIVRE_OAUTH_TOKEN_URL) || DEFAULT_OAUTH_TOKEN_URL,
+    clientId: normalizeText(process.env.MERCADOLIVRE_CLIENT_ID),
+    clientSecret: normalizeText(process.env.MERCADOLIVRE_CLIENT_SECRET),
+    redirectUri: normalizeText(process.env.MERCADOLIVRE_REDIRECT_URI),
   };
 }
 
-async function loadRuntimeOAuthFromDatabase() {
-  if (runtimeOAuth?.accessToken || runtimeOAuthLoadedFromDb) {
-    return;
-  }
+function hasLiveCredentials() {
+  const config = getConfig();
 
-  runtimeOAuthLoadedFromDb = true;
-
-  try {
-    const persistedAccount = await prisma.marketplaceAccount.findFirst({
-      where: {
-        ...mercadoLivreAccountFilter(),
-        isActive: true,
-        accessToken: {
-          not: null,
-        },
-      },
-      orderBy: {
-        updatedAt: "desc",
-      },
-    });
-
-    if (!persistedAccount?.accessToken) {
-      return;
-    }
-
-    runtimeOAuth = {
-      accessToken: persistedAccount.accessToken,
-      refreshToken: persistedAccount.refreshToken || null,
-      sellerId: persistedAccount.sellerId || null,
-      tokenExpiresAt: persistedAccount.tokenExpiresAt
-        ? persistedAccount.tokenExpiresAt.toISOString()
-        : null,
-      accountId: persistedAccount.id,
-      accountName: persistedAccount.accountName,
-      source: "database",
-    };
-  } catch (error) {
-    console.error("[mercadolivre-oauth:load-db]", error);
-  }
-}
-
-async function tokenSource() {
-  if (runtimeOAuth && runtimeOAuth.accessToken) {
-    return { ...runtimeOAuth };
-  }
-
-  const accessToken = env("MERCADOLIVRE_ACCESS_TOKEN");
-  if (accessToken) {
-    return {
-      accessToken,
-      sellerId: env("MERCADOLIVRE_SELLER_ID") || null,
-      source: "env",
-    };
-  }
-
-  await loadRuntimeOAuthFromDatabase();
-
-  if (runtimeOAuth && runtimeOAuth.accessToken) {
-    return { ...runtimeOAuth };
-  }
-
-  return null;
-}
-
-async function hasLiveCredentials() {
-  return Boolean(await tokenSource());
-}
-
-function createHttpError(status, message) {
-  const error = new Error(message);
-  error.status = status;
-  return error;
-}
-
-function buildApiError(response, payload, fallbackMessage) {
-  const status = Number(response?.status);
-  const message =
-    (payload && (payload.message || payload.error_description || payload.error)) ||
-    fallbackMessage;
-
-  if (status >= 400 && status < 500) {
-    return createHttpError(400, message);
-  }
-
-  return createHttpError(500, message);
-}
-
-function oauthStateSecret() {
-  return env(
-    "MERCADOLIVRE_OAUTH_STATE_SECRET",
-    env("MERCADOLIVRE_CLIENT_SECRET", DEFAULT_OAUTH_STATE_SECRET)
-  );
-}
-
-function signOAuthState(unsignedState) {
-  return createHmac("sha256", oauthStateSecret())
-    .update(String(unsignedState || ""))
-    .digest("hex");
-}
-
-function timingSafeEqualText(left, right) {
-  const leftBuffer = Buffer.from(String(left || ""));
-  const rightBuffer = Buffer.from(String(right || ""));
-
-  if (leftBuffer.length !== rightBuffer.length) {
+  if (config.mode === "mock") {
     return false;
   }
 
-  return timingSafeEqual(leftBuffer, rightBuffer);
+  return Boolean(config.clientId && config.clientSecret && config.redirectUri);
 }
 
-function createOAuthStateToken() {
-  const issuedAt = Date.now();
-  const nonce = randomUUID().replace(/-/g, "");
-  const unsignedState = `${issuedAt}.${nonce}`;
-  const signature = signOAuthState(unsignedState);
+function getRequestTimeout() {
+  const parsedTimeout = Number(process.env.MERCADOLIVRE_REQUEST_TIMEOUT_MS);
 
-  return `${unsignedState}.${signature}`;
+  if (!Number.isFinite(parsedTimeout) || parsedTimeout < 2000) {
+    return DEFAULT_TIMEOUT_MS;
+  }
+
+  return parsedTimeout;
 }
 
-function assertValidOAuthState(state) {
-  const stateText = String(state || "").trim();
-
-  if (!stateText) {
-    throw createHttpError(400, "State OAuth invalido.");
-  }
-
-  const parts = stateText.split(".");
-
-  if (parts.length !== 3) {
-    throw createHttpError(400, "State OAuth invalido.");
-  }
-
-  const [issuedAtText, nonce, signature] = parts;
-
-  if (!issuedAtText || !nonce || !signature) {
-    throw createHttpError(400, "State OAuth invalido.");
-  }
-
-  const issuedAt = Number(issuedAtText);
-  if (!Number.isFinite(issuedAt)) {
-    throw createHttpError(400, "State OAuth invalido.");
-  }
-
-  const now = Date.now();
-  if (issuedAt > now + OAUTH_STATE_MAX_CLOCK_SKEW_MS) {
-    throw createHttpError(400, "State OAuth invalido.");
-  }
-
-  if (now - issuedAt > OAUTH_STATE_TTL_MS) {
-    throw createHttpError(400, "State OAuth expirado. Gere um novo link de autorizacao.");
-  }
-
-  const expectedSignature = signOAuthState(`${issuedAtText}.${nonce}`);
-  if (!timingSafeEqualText(signature, expectedSignature)) {
-    throw createHttpError(400, "State OAuth invalido.");
-  }
+function throwClientError(message, status = 400, payload = null) {
+  throw new MercadoLivreLiveServiceError(message, status, payload);
 }
 
-async function parseResponseBody(response) {
-  const text = await response.text();
-  if (!text) return null;
-  try {
-    return JSON.parse(text);
-  } catch {
-    return text;
-  }
-}
+function ensureLiveConfig() {
+  const config = getConfig();
 
-async function meliRequest(pathname, options = {}) {
-  const source = await tokenSource();
-  if (!source || !source.accessToken) {
-    throw createHttpError(
-      400,
-      "Configure MERCADOLIVRE_ACCESS_TOKEN para usar integracao real."
+  if (config.mode === "mock") {
+    throwClientError("Modo mock ativo para Mercado Livre.", 503);
+  }
+
+  if (!config.clientId || !config.clientSecret || !config.redirectUri) {
+    throwClientError(
+      "Defina MERCADOLIVRE_CLIENT_ID, MERCADOLIVRE_CLIENT_SECRET e MERCADOLIVRE_REDIRECT_URI.",
+      503
     );
   }
 
-  const url = new URL(pathname.startsWith("/") ? pathname : `/${pathname}`, apiBaseUrl());
-  if (options.query) {
-    Object.entries(options.query).forEach(([key, value]) => {
-      if (value === undefined || value === null || value === "") return;
-      url.searchParams.set(key, String(value));
+  return config;
+}
+
+async function requestJson(url, options = {}) {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), getRequestTimeout());
+
+  try {
+    const response = await fetch(url, {
+      ...options,
+      signal: controller.signal,
     });
+
+    const payload = await response.json().catch(() => null);
+
+    if (!response.ok) {
+      const message =
+        payload?.message ||
+        payload?.error_description ||
+        payload?.error ||
+        `Falha ao chamar Mercado Livre (${response.status}).`;
+
+      throw new MercadoLivreLiveServiceError(message, response.status, payload);
+    }
+
+    return payload;
+  } catch (error) {
+    if (error?.name === "AbortError") {
+      throw new MercadoLivreLiveServiceError(
+        "Tempo limite ao chamar a API do Mercado Livre.",
+        504
+      );
+    }
+
+    if (error instanceof MercadoLivreLiveServiceError) {
+      throw error;
+    }
+
+    throw new MercadoLivreLiveServiceError(
+      error?.message || "Erro ao chamar a API do Mercado Livre.",
+      502
+    );
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
+function buildBearerHeader(accessToken) {
+  const token = normalizeText(accessToken);
+
+  if (!token) {
+    throwClientError("Conta Mercado Livre sem access token valido.", 401);
   }
 
-  const response = await fetch(url, {
-    method: options.method || "GET",
-    headers: {
-      Authorization: `Bearer ${source.accessToken}`,
-      ...(options.body !== undefined ? { "Content-Type": "application/json" } : {}),
-    },
-    body: options.body !== undefined ? JSON.stringify(options.body) : undefined,
-  });
-  const payload = await parseResponseBody(response);
-
-  if (!response.ok) {
-    const message =
-      (payload && (payload.message || payload.error_description || payload.error)) ||
-      `Erro Mercado Livre (${response.status})`;
-    throw createHttpError(response.status >= 400 && response.status < 500 ? 400 : 500, message);
-  }
-
-  return payload;
-}
-
-async function resolveSellerId() {
-  const source = await tokenSource();
-  if (source && source.sellerId) return source.sellerId;
-  const me = await meliRequest("/users/me");
-  if (!me || !me.id) {
-    throw createHttpError(400, "Nao foi possivel resolver seller_id no Mercado Livre.");
-  }
-  return String(me.id);
-}
-
-function normalizeQuestion(raw) {
-  const answer = raw && typeof raw.answer === "object" ? raw.answer : null;
-  const answered = Boolean((answer && answer.text) || raw.answer_text);
   return {
-    id: String(raw.id),
-    itemId: String(raw.item_id || raw.itemId || ""),
-    itemTitle: raw.item_title || `Anuncio ${raw.item_id || raw.itemId || ""}`,
-    questionText: raw.text || raw.questionText || "",
-    answerText: raw.answer_text || (answer && answer.text) || null,
-    status: answered ? "answered" : "unanswered",
-    isAnswered: answered,
-    canDismiss: answered,
-    statusLabel: answered ? "Respondida" : "Nao respondida",
-    statusTone: answered ? "answered" : "pending",
-    createdAt: raw.date_created || raw.createdAt || new Date().toISOString(),
-    answeredAt: (answer && (answer.date_created || answer.dateCreated)) || null,
-    buyerNickname:
-      (raw.from && (raw.from.nickname || raw.from.id)) || raw.buyer_nickname || "Comprador",
-    thumbnail: raw.thumbnail || null,
-    sku: raw.sku || null,
-    isUrgent: false,
-    needsAttention: false,
-    openDurationLabel: null,
-    answerDelayLabel: null,
+    Authorization: `Bearer ${token}`,
   };
 }
 
-async function listQuestions() {
-  const sellerId = await resolveSellerId();
-  const payload = await meliRequest("/questions/search", {
-    query: {
-      seller_id: sellerId,
-      limit: 50,
-      offset: 0,
-    },
-  });
-  const rows = Array.isArray(payload.questions) ? payload.questions : [];
-  const items = rows.map(normalizeQuestion).filter((q) => !dismissedIds.has(q.id));
-  lastSyncAt = new Date().toISOString();
-  return {
-    items,
-    meta: {
-      filters: { status: "all", period: "30d", sort: "recent", itemId: "all", search: "" },
-      total: items.length,
-      filteredTotal: items.length,
-      overview: {
-        total: items.length,
-        answered: items.filter((q) => q.isAnswered).length,
-        unanswered: items.filter((q) => !q.isAnswered).length,
-        urgent: 0,
-        averageResponseHours: 0,
-        responseRate: items.length
-          ? items.filter((q) => q.isAnswered).length / items.length
-          : 0,
-      },
-      availableAnnouncements: [],
-      announcementCount: 0,
-      lastSyncAt,
-      source: "mercado-livre-api",
-    },
-  };
-}
-
-async function getQuestionById(questionId) {
-  const payload = await listQuestions();
-  const question = payload.items.find((item) => item.id === String(questionId));
-  if (!question) throw createHttpError(404, "Pergunta nao encontrada.");
-  return {
-    question: {
-      ...question,
-      replyAllowed: !question.isAnswered,
-      timeline: [
-        {
-          id: `${question.id}-question`,
-          label: "Pergunta recebida",
-          timestamp: question.createdAt,
-          description: `${question.buyerNickname} enviou a pergunta.`,
-        },
-      ],
-      suggestedReplies: [
-        "Sim, temos esse detalhe confirmado.",
-        "Posso confirmar envio e garantia para voce.",
-        "Se quiser, valido compatibilidade agora.",
-      ],
-    },
-    meta: {
-      lastSyncAt,
-      source: "mercado-livre-api",
-    },
-  };
-}
-
-async function replyQuestion(questionId, text) {
-  const answer = String(text || "").trim();
-  if (answer.length < 8) {
-    throw createHttpError(400, "A resposta deve ter pelo menos 8 caracteres.");
-  }
-
-  await meliRequest("/answers", {
-    method: "POST",
-    body: { question_id: String(questionId), text: answer },
-  });
-
-  return {
-    message: "Resposta enviada com sucesso para o Mercado Livre.",
-    ...(await getQuestionById(questionId)),
-  };
-}
-
-async function dismissQuestion(questionId, filters = {}) {
-  dismissedIds.add(String(questionId));
-  return {
-    ...(await listQuestions(filters)),
-    message: "Pergunta removida da lista visivel.",
-  };
-}
-
-async function dismissAnsweredQuestions(filters = {}) {
-  const payload = await listQuestions(filters);
-  payload.items.filter((item) => item.isAnswered).forEach((item) => dismissedIds.add(item.id));
-  return {
-    ...(await listQuestions(filters)),
-    message: "Perguntas respondidas removidas da lista.",
-  };
-}
-
-async function refreshQuestions(filters = {}) {
-  return {
-    ...(await listQuestions(filters)),
-    message: "Perguntas atualizadas a partir da API do Mercado Livre.",
-  };
-}
-
-async function syncQuestions(filters = {}) {
-  return {
-    ...(await listQuestions(filters)),
-    message: "Sincronizacao concluida com a API do Mercado Livre.",
-  };
-}
-
-function resolveTokenExpiresAt(expiresIn) {
-  const expiresInSeconds = Number(expiresIn);
-
-  if (!Number.isFinite(expiresInSeconds) || expiresInSeconds <= 0) {
+function toIsoDateOrNull(value) {
+  if (!value) {
     return null;
   }
 
-  return new Date(Date.now() + expiresInSeconds * 1000);
+  const parsedDate = new Date(value);
+
+  if (Number.isNaN(parsedDate.getTime())) {
+    return null;
+  }
+
+  return parsedDate.toISOString();
 }
 
-async function persistOAuthCredentials({
-  accessToken,
-  refreshToken = null,
-  sellerId = null,
-  tokenExpiresAt = null,
-}) {
-  try {
-    const normalizedSellerId = sellerId ? String(sellerId) : null;
-    const marketplaceFilter = mercadoLivreAccountFilter();
+function normalizeTokenPayload(payload = {}) {
+  const expiresInSeconds = Number(payload.expires_in || 0);
+  const expiresAtDate = new Date(
+    Date.now() + Math.max(0, Number.isFinite(expiresInSeconds) ? expiresInSeconds * 1000 : 0)
+  );
 
-    let account = null;
+  return {
+    accessToken: normalizeText(payload.access_token),
+    refreshToken: normalizeText(payload.refresh_token),
+    tokenType: normalizeText(payload.token_type),
+    scope: normalizeText(payload.scope),
+    expiresIn: Number.isFinite(expiresInSeconds) ? expiresInSeconds : 0,
+    expiresAt: expiresAtDate.toISOString(),
+  };
+}
 
-    if (normalizedSellerId) {
-      account = await prisma.marketplaceAccount.findFirst({
-        where: {
-          ...marketplaceFilter,
-          sellerId: normalizedSellerId,
-        },
-        orderBy: {
-          updatedAt: "desc",
-        },
-      });
-    }
+function toNumber(value, fallback = 0) {
+  const parsed = Number(value);
 
-    if (!account) {
-      account = await prisma.marketplaceAccount.findFirst({
-        where: marketplaceFilter,
-        orderBy: {
-          createdAt: "asc",
-        },
-      });
-    }
+  if (!Number.isFinite(parsed)) {
+    return fallback;
+  }
 
-    if (!account) {
-      return {
-        persisted: false,
-        reason: "Nenhuma conta Mercado Livre encontrada para persistir o token OAuth.",
-      };
-    }
+  return parsed;
+}
 
-    const updatedAccount = await prisma.marketplaceAccount.update({
-      where: {
-        id: account.id,
+function buildItemSku(item = {}) {
+  if (item.seller_custom_field) {
+    return String(item.seller_custom_field);
+  }
+
+  if (item.seller_sku) {
+    return String(item.seller_sku);
+  }
+
+  const attributes = Array.isArray(item.attributes) ? item.attributes : [];
+  const skuAttribute = attributes.find((attribute) =>
+    ["SELLER_SKU", "SKU"].includes(String(attribute?.id || "").toUpperCase())
+  );
+
+  return skuAttribute?.value_name ? String(skuAttribute.value_name) : null;
+}
+
+function chunkArray(items = [], size = 20) {
+  const chunks = [];
+
+  for (let index = 0; index < items.length; index += size) {
+    chunks.push(items.slice(index, index + size));
+  }
+
+  return chunks;
+}
+
+async function fetchMlUserProfile(accessToken) {
+  const config = ensureLiveConfig();
+
+  const payload = await requestJson(`${config.apiBaseUrl}/users/me`, {
+    method: "GET",
+    headers: {
+      ...buildBearerHeader(accessToken),
+    },
+  });
+
+  return {
+    id: payload?.id ? String(payload.id) : null,
+    nickname: payload?.nickname ? String(payload.nickname) : null,
+    siteId: payload?.site_id ? String(payload.site_id) : null,
+    raw: payload,
+  };
+}
+
+async function exchangeAuthorizationCode(code) {
+  const normalizedCode = normalizeText(code);
+
+  if (!normalizedCode) {
+    throwClientError("Codigo OAuth invalido.", 400);
+  }
+
+  const config = ensureLiveConfig();
+
+  const payload = await requestJson(config.oauthTokenUrl, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded",
+    },
+    body: new URLSearchParams({
+      grant_type: "authorization_code",
+      client_id: config.clientId,
+      client_secret: config.clientSecret,
+      code: normalizedCode,
+      redirect_uri: config.redirectUri,
+    }),
+  });
+
+  return normalizeTokenPayload(payload);
+}
+
+async function refreshAccessToken(refreshToken) {
+  const normalizedRefreshToken = normalizeText(refreshToken);
+
+  if (!normalizedRefreshToken) {
+    throwClientError("Conta Mercado Livre sem refresh token valido.", 401);
+  }
+
+  const config = ensureLiveConfig();
+
+  const payload = await requestJson(config.oauthTokenUrl, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded",
+    },
+    body: new URLSearchParams({
+      grant_type: "refresh_token",
+      client_id: config.clientId,
+      client_secret: config.clientSecret,
+      refresh_token: normalizedRefreshToken,
+    }),
+  });
+
+  return normalizeTokenPayload(payload);
+}
+
+async function requestWithAutoRefresh(path, accountTokenSource = {}, options = {}) {
+  const config = ensureLiveConfig();
+  const normalizedPath = String(path || "").trim();
+
+  if (!normalizedPath.startsWith("/")) {
+    throwClientError("Caminho da API Mercado Livre invalido.", 500);
+  }
+
+  const executeRequest = async (accessToken) => {
+    return requestJson(`${config.apiBaseUrl}${normalizedPath}`, {
+      method: options.method || "GET",
+      headers: {
+        ...(options.body ? { "Content-Type": "application/json" } : {}),
+        ...buildBearerHeader(accessToken),
+        ...(options.headers || {}),
       },
-      data: {
-        sellerId: normalizedSellerId || account.sellerId,
-        accessToken,
-        refreshToken: refreshToken || account.refreshToken,
-        tokenExpiresAt,
-        isActive: true,
-      },
+      body: options.body ? JSON.stringify(options.body) : undefined,
     });
+  };
+
+  const accessToken = normalizeText(accountTokenSource.accessToken);
+
+  try {
+    const payload = await executeRequest(accessToken);
 
     return {
-      persisted: true,
-      reason: `Token OAuth salvo na conta ${updatedAccount.accountName}.`,
-      accountId: updatedAccount.id,
-      accountName: updatedAccount.accountName,
+      payload,
+      tokenState: null,
     };
   } catch (error) {
-    console.error("[mercadolivre-oauth:persist-db]", error);
+    const shouldRefresh =
+      error instanceof MercadoLivreLiveServiceError &&
+      error.status === 401 &&
+      normalizeText(accountTokenSource.refreshToken);
+
+    if (!shouldRefresh) {
+      throw error;
+    }
+
+    const refreshedToken = await refreshAccessToken(accountTokenSource.refreshToken);
+
+    const payload = await executeRequest(refreshedToken.accessToken);
+
     return {
-      persisted: false,
-      reason: "Falha ao salvar token OAuth no banco.",
+      payload,
+      tokenState: refreshedToken,
     };
   }
+}
+
+async function fetchItemsByIds(itemIds = [], accountTokenSource = {}) {
+  const normalizedItemIds = Array.from(
+    new Set(
+      itemIds
+        .map((itemId) => normalizeText(itemId))
+        .filter(Boolean)
+    )
+  );
+
+  if (!normalizedItemIds.length) {
+    return {
+      itemsById: new Map(),
+      tokenState: null,
+    };
+  }
+
+  const chunks = chunkArray(normalizedItemIds, 20);
+  const itemsById = new Map();
+  let latestTokenState = null;
+
+  for (const chunk of chunks) {
+    const { payload, tokenState } = await requestWithAutoRefresh(
+      `/items?ids=${encodeURIComponent(chunk.join(","))}`,
+      accountTokenSource,
+      {
+        method: "GET",
+      }
+    );
+
+    if (tokenState) {
+      latestTokenState = tokenState;
+      accountTokenSource.accessToken = tokenState.accessToken;
+      accountTokenSource.refreshToken = tokenState.refreshToken;
+    }
+
+    const entries = Array.isArray(payload) ? payload : [];
+
+    for (const entry of entries) {
+      const body = entry?.body;
+      const id = normalizeText(body?.id || entry?.id);
+
+      if (!id) {
+        continue;
+      }
+
+      itemsById.set(id, body || entry);
+    }
+  }
+
+  return {
+    itemsById,
+    tokenState: latestTokenState,
+  };
+}
+
+function mapQuestion(question = {}, itemData = {}) {
+  const answerText = normalizeText(question?.answer?.text || "") || null;
+  const answeredAt = toIsoDateOrNull(question?.answer?.date_created || question?.answer?.date_created_from);
+  const createdAt =
+    toIsoDateOrNull(question?.date_created || question?.created_at) || new Date().toISOString();
+
+  return {
+    id: normalizeText(question?.id),
+    itemId: normalizeText(question?.item_id),
+    itemTitle:
+      normalizeText(itemData?.title) ||
+      normalizeText(question?.item_title) ||
+      `Anuncio ${normalizeText(question?.item_id)}`,
+    questionText: normalizeText(question?.text),
+    answerText,
+    createdAt,
+    answeredAt,
+    buyerNickname:
+      normalizeText(question?.from?.nickname) ||
+      (question?.from?.id ? `Comprador ${question.from.id}` : "Comprador"),
+    thumbnail: normalizeText(itemData?.thumbnail) || null,
+    sku: buildItemSku(itemData),
+    rawPayload: question,
+  };
+}
+
+function mapOrderEntry(order = {}) {
+  const orderItems = Array.isArray(order.order_items) ? order.order_items : [];
+  const payments = Array.isArray(order.payments) ? order.payments : [];
+
+  const marketplaceFee = payments.reduce((sum, payment) => {
+    return sum + toNumber(payment.marketplace_fee, 0);
+  }, 0);
+
+  const shippingFee = toNumber(order?.shipping?.cost, 0);
+  const discountAmount = toNumber(order?.coupon?.amount, 0);
+  const totalAmount = toNumber(order.total_amount || order.paid_amount, 0);
+
+  return {
+    id: normalizeText(order?.id),
+    status: normalizeText(order?.status) || "EM_PROCESSAMENTO",
+    saleDate:
+      toIsoDateOrNull(order?.date_created || order?.date_closed || order?.last_updated) ||
+      new Date().toISOString(),
+    buyerName: normalizeText(order?.buyer?.nickname) || "Comprador",
+    totalAmount,
+    marketplaceFee,
+    shippingFee,
+    discountAmount,
+    taxAmount: 0,
+    netReceived: totalAmount - marketplaceFee - shippingFee - discountAmount,
+    items: orderItems.map((entry) => {
+      const quantity = toNumber(entry?.quantity, 0);
+      const unitPrice = toNumber(entry?.unit_price, 0);
+
+      return {
+        marketplaceItemId: normalizeText(entry?.item?.id),
+        title: normalizeText(entry?.item?.title) || "Item sem titulo",
+        sku:
+          normalizeText(entry?.item?.seller_sku) ||
+          normalizeText(entry?.item?.seller_custom_field) ||
+          null,
+        quantity,
+        unitPrice,
+        totalPrice: quantity * unitPrice,
+      };
+    }),
+    rawPayload: order,
+  };
+}
+
+async function fetchOrderById(orderId, accountTokenSource = {}) {
+  const normalizedOrderId = normalizeText(orderId);
+
+  if (!normalizedOrderId) {
+    return null;
+  }
+
+  const { payload, tokenState } = await requestWithAutoRefresh(
+    `/orders/${encodeURIComponent(normalizedOrderId)}`,
+    accountTokenSource,
+    {
+      method: "GET",
+    }
+  );
+
+  return {
+    payload,
+    tokenState,
+  };
+}
+
+function mapItemEntry(item = {}) {
+  return {
+    id: normalizeText(item?.id),
+    title: normalizeText(item?.title) || "Item sem titulo",
+    price: toNumber(item?.price, 0),
+    status: normalizeText(item?.status) || "unknown",
+    availableQuantity: Number(toNumber(item?.available_quantity, 0)),
+    thumbnail: normalizeText(item?.thumbnail) || null,
+    category: normalizeText(item?.category_id) || null,
+    sku: buildItemSku(item),
+    rawPayload: item,
+  };
 }
 
 function getAuthorizationUrl(payload = {}) {
-  const clientId = env("MERCADOLIVRE_CLIENT_ID");
-  const redirectUri = env("MERCADOLIVRE_REDIRECT_URI");
-  if (!clientId || !redirectUri) {
-    throw createHttpError(
-      400,
-      "Defina MERCADOLIVRE_CLIENT_ID e MERCADOLIVRE_REDIRECT_URI para iniciar OAuth."
-    );
+  const config = ensureLiveConfig();
+
+  const state = normalizeText(payload.state);
+
+  if (!state) {
+    throwClientError("State OAuth invalido.", 400);
   }
-  // State assinado para funcionar em ambientes com restart/replicas sem depender de memoria local.
-  const state = createOAuthStateToken(payload);
-  const url = new URL(env("MERCADOLIVRE_AUTH_BASE_URL", DEFAULT_AUTH_BASE_URL));
+
+  const url = new URL(config.authBaseUrl);
   url.searchParams.set("response_type", "code");
-  url.searchParams.set("client_id", clientId);
-  url.searchParams.set("redirect_uri", redirectUri);
+  url.searchParams.set("client_id", config.clientId);
+  url.searchParams.set("redirect_uri", config.redirectUri);
   url.searchParams.set("state", state);
-  return { authorizationUrl: url.toString(), state };
+
+  if (payload.scope) {
+    url.searchParams.set("scope", String(payload.scope));
+  }
+
+  return {
+    mode: config.mode,
+    authorizationUrl: url.toString(),
+    state,
+    redirectUri: config.redirectUri,
+  };
 }
 
 async function completeAuthorizationCallback(query = {}) {
-  if (query.error) throw createHttpError(400, query.error_description || "OAuth cancelado.");
-  const state = String(query.state || "");
-  const code = String(query.code || "");
-  if (!state || !code) throw createHttpError(400, "Callback OAuth invalido.");
-  assertValidOAuthState(state);
+  const code = normalizeText(query.code);
 
-  const clientId = env("MERCADOLIVRE_CLIENT_ID");
-  const clientSecret = env("MERCADOLIVRE_CLIENT_SECRET");
-  const redirectUri = env("MERCADOLIVRE_REDIRECT_URI");
-  if (!clientId || !clientSecret || !redirectUri) {
-    throw createHttpError(400, "Credenciais OAuth incompletas.");
+  if (!code) {
+    throwClientError("Authorization code nao recebido no callback OAuth.", 400);
   }
 
-  const body = new URLSearchParams({
-    grant_type: "authorization_code",
-    client_id: clientId,
-    client_secret: clientSecret,
-    code,
-    redirect_uri: redirectUri,
-  });
-  const response = await fetch(env("MERCADOLIVRE_OAUTH_TOKEN_URL", `${apiBaseUrl()}/oauth/token`), {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: body.toString(),
-  });
-  const payload = await parseResponseBody(response);
-  if (!response.ok) throw buildApiError(response, payload, "Falha no OAuth Mercado Livre.");
+  const tokenPayload = await exchangeAuthorizationCode(code);
+  const profile = await fetchMlUserProfile(tokenPayload.accessToken);
 
-  const accessToken = payload.access_token || null;
-  if (!accessToken) {
-    throw createHttpError(
-      500,
-      "OAuth retornou sem access_token. Verifique escopos e configuracao do app no Mercado Livre."
-    );
+  if (!profile?.id) {
+    throwClientError("Nao foi possivel identificar o seller do Mercado Livre.", 502);
   }
 
-  const tokenExpiresAt = resolveTokenExpiresAt(payload.expires_in);
-  const persisted = await persistOAuthCredentials({
-    accessToken,
-    refreshToken: payload.refresh_token || null,
-    sellerId: payload.user_id ? String(payload.user_id) : null,
-    tokenExpiresAt,
-  });
-
-  runtimeOAuth = {
-    accessToken,
-    refreshToken: payload.refresh_token || null,
-    sellerId: payload.user_id ? String(payload.user_id) : null,
-    tokenExpiresAt: tokenExpiresAt ? tokenExpiresAt.toISOString() : null,
-    source: "oauth-runtime",
-    accountId: persisted.accountId || null,
-    accountName: persisted.accountName || null,
-  };
   return {
     connected: true,
-    mode: "oauth",
+    source: "mercado-livre-api",
+    credentials: tokenPayload,
     account: {
-      sellerId: runtimeOAuth.sellerId,
-      accountName: runtimeOAuth.accountName,
-    },
-    persistence: {
-      persisted: Boolean(persisted.persisted),
-      reason: persisted.reason || "Sessao em memoria (runtime).",
+      sellerId: profile.id,
+      nickname: profile.nickname,
+      siteId: profile.siteId,
     },
   };
 }
 
-async function receiveWebhook(payload = {}) {
-  const eventId = payload.id || randomUUID();
-  webhookEvents.unshift({
-    id: eventId,
-    topic: payload.topic || "questions",
-    resource: payload.resource || null,
-    receivedAt: new Date().toISOString(),
+async function pullQuestionsFromApi(accountTokenSource = {}) {
+  const sellerId = normalizeText(accountTokenSource.sellerId);
+
+  if (!sellerId) {
+    throwClientError("Conta Mercado Livre sem sellerId para sincronizar perguntas.", 400);
+  }
+
+  const { payload, tokenState } = await requestWithAutoRefresh(
+    `/questions/search?seller_id=${encodeURIComponent(sellerId)}&limit=50`,
+    { ...accountTokenSource },
+    {
+      method: "GET",
+    }
+  );
+
+  const questionsRaw = Array.isArray(payload?.questions) ? payload.questions : [];
+  const itemIds = questionsRaw.map((question) => question?.item_id).filter(Boolean);
+
+  const {
+    itemsById,
+    tokenState: tokenStateFromItems,
+  } = await fetchItemsByIds(itemIds, {
+    ...accountTokenSource,
+    ...(tokenState ? { accessToken: tokenState.accessToken, refreshToken: tokenState.refreshToken } : {}),
   });
-  if (webhookEvents.length > 20) webhookEvents.length = 20;
+
+  const mappedItems = questionsRaw
+    .map((question) => mapQuestion(question, itemsById.get(String(question?.item_id)) || {}))
+    .filter((item) => item.id && item.itemId && item.questionText);
+
   return {
-    received: true,
-    mode: (await hasLiveCredentials()) ? "live" : "mock",
-    eventId,
-    queued: false,
-    latestEvents: webhookEvents.slice(0, 5).map((event) => ({ ...event })),
+    items: mappedItems,
+    meta: {
+      source: "mercado-livre-api",
+      total: mappedItems.length,
+      lastSyncAt: new Date().toISOString(),
+      tokenState: tokenStateFromItems || tokenState || null,
+    },
   };
 }
 
-async function getIntegrationStatus() {
-  const source = await tokenSource();
+async function replyQuestion(questionId, answerText, accountTokenSource = {}) {
+  const id = normalizeText(questionId);
+  const text = normalizeText(answerText);
+
+  if (!id || !text) {
+    throwClientError("Pergunta ou resposta invalida.", 400);
+  }
+
+  const { tokenState } = await requestWithAutoRefresh(
+    "/answers",
+    { ...accountTokenSource },
+    {
+      method: "POST",
+      body: {
+        question_id: id,
+        text,
+      },
+    }
+  );
+
   return {
-    mode: mode(),
-    usingLive: mode() === "live" || (mode() === "auto" && Boolean(source)),
-    hasCredentials: Boolean(source),
-    source: source ? source.source || "unknown" : "none",
-    account: source
-      ? {
-          sellerId: source.sellerId || null,
-          accountName: source.accountName || null,
-          tokenExpiresAt: source.tokenExpiresAt || null,
-        }
-      : null,
-    instructions: source
-      ? null
-      : "Conecte via OAuth ou configure MERCADOLIVRE_ACCESS_TOKEN no backend/.env.",
+    sent: true,
+    id,
+    tokenState: tokenState || null,
+  };
+}
+
+async function pullOrdersFromApi(accountTokenSource = {}, options = {}) {
+  const sellerId = normalizeText(accountTokenSource.sellerId);
+
+  if (!sellerId) {
+    throwClientError("Conta Mercado Livre sem sellerId para sincronizar pedidos.", 400);
+  }
+
+  const limit = Math.max(1, Math.min(Number(options.limit) || 50, 50));
+
+  const { payload, tokenState } = await requestWithAutoRefresh(
+    `/orders/search?seller=${encodeURIComponent(sellerId)}&sort=date_desc&limit=${limit}`,
+    { ...accountTokenSource },
+    {
+      method: "GET",
+    }
+  );
+
+  const rawResults = Array.isArray(payload?.results) ? payload.results : [];
+  const orders = [];
+  let latestTokenState = tokenState || null;
+
+  for (const entry of rawResults) {
+    const orderId =
+      entry && typeof entry === "object" && entry.id
+        ? normalizeText(entry.id)
+        : normalizeText(entry);
+
+    if (!orderId) {
+      continue;
+    }
+
+    if (
+      entry &&
+      typeof entry === "object" &&
+      entry.id &&
+      Array.isArray(entry.order_items) &&
+      entry.order_items.length
+    ) {
+      orders.push(mapOrderEntry(entry));
+      continue;
+    }
+
+    try {
+      const orderResult = await fetchOrderById(orderId, {
+        ...accountTokenSource,
+        ...(latestTokenState
+          ? {
+              accessToken: latestTokenState.accessToken,
+              refreshToken: latestTokenState.refreshToken,
+            }
+          : {}),
+      });
+
+      if (orderResult?.tokenState) {
+        latestTokenState = orderResult.tokenState;
+      }
+
+      if (orderResult?.payload) {
+        orders.push(mapOrderEntry(orderResult.payload));
+      }
+    } catch {
+      // Mantem a sincronizacao resiliente quando um pedido isolado nao puder ser carregado.
+    }
+  }
+
+  return {
+    items: orders,
+    meta: {
+      source: "mercado-livre-api",
+      total: orders.length,
+      lastSyncAt: new Date().toISOString(),
+      tokenState: latestTokenState || null,
+    },
+  };
+}
+
+async function pullItemsFromApi(accountTokenSource = {}, options = {}) {
+  const sellerId = normalizeText(accountTokenSource.sellerId);
+
+  if (!sellerId) {
+    throwClientError("Conta Mercado Livre sem sellerId para sincronizar anuncios.", 400);
+  }
+
+  const limit = Math.max(1, Math.min(Number(options.limit) || 100, 100));
+
+  const { payload, tokenState } = await requestWithAutoRefresh(
+    `/users/${encodeURIComponent(sellerId)}/items/search?limit=${limit}`,
+    { ...accountTokenSource },
+    {
+      method: "GET",
+    }
+  );
+
+  const itemIds = Array.isArray(payload?.results) ? payload.results : [];
+
+  const {
+    itemsById,
+    tokenState: tokenStateFromItems,
+  } = await fetchItemsByIds(itemIds, {
+    ...accountTokenSource,
+    ...(tokenState ? { accessToken: tokenState.accessToken, refreshToken: tokenState.refreshToken } : {}),
+  });
+
+  const items = Array.from(itemsById.values())
+    .map((entry) => mapItemEntry(entry))
+    .filter((entry) => entry.id);
+
+  return {
+    items,
+    meta: {
+      source: "mercado-livre-api",
+      total: items.length,
+      lastSyncAt: new Date().toISOString(),
+      tokenState: tokenStateFromItems || tokenState || null,
+    },
   };
 }
 
 module.exports = {
+  MercadoLivreLiveServiceError,
   completeAuthorizationCallback,
-  dismissAnsweredQuestions,
-  dismissQuestion,
+  exchangeAuthorizationCode,
   getAuthorizationUrl,
-  getIntegrationStatus,
   hasLiveCredentials,
-  listQuestions,
   mode,
-  receiveWebhook,
-  refreshQuestions,
+  pullItemsFromApi,
+  pullOrdersFromApi,
+  pullQuestionsFromApi,
+  refreshAccessToken,
   replyQuestion,
-  syncQuestions,
-  getQuestionById,
 };

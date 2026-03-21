@@ -1,22 +1,29 @@
 const {
   completeAuthorizationCallback,
+  disconnectIntegration,
   dismissAnsweredQuestions,
   dismissQuestion,
   getAuthorizationUrl,
   getIntegrationStatus,
+  listMarketplaceItems,
+  listMarketplaceOrders,
   MercadoLivreQuestionNotFoundError,
   MercadoLivreQuestionValidationError,
+  refreshIntegrationToken,
   getQuestionById,
   listQuestions,
   receiveWebhook,
   refreshQuestions,
   replyQuestion,
+  syncItems,
+  syncMarketplaceData,
+  syncOrders,
   syncQuestions,
 } = require("./mercadolivreQuestions.service");
 
 async function fetchQuestions(req, res) {
   try {
-    const payload = await listQuestions(req.query);
+    const payload = await listQuestions(req.query, req);
     res.json(payload);
   } catch (error) {
     handleMercadoLivreError(error, res);
@@ -25,7 +32,7 @@ async function fetchQuestions(req, res) {
 
 async function fetchQuestionById(req, res) {
   try {
-    const payload = await getQuestionById(req.params.questionId);
+    const payload = await getQuestionById(req.params.questionId, req);
     res.json(payload);
   } catch (error) {
     handleMercadoLivreError(error, res);
@@ -34,7 +41,7 @@ async function fetchQuestionById(req, res) {
 
 async function postQuestionReply(req, res) {
   try {
-    const payload = await replyQuestion(req.params.questionId, req.body.text);
+    const payload = await replyQuestion(req.params.questionId, req.body.text, req);
     res.status(201).json(payload);
   } catch (error) {
     handleMercadoLivreError(error, res);
@@ -43,7 +50,7 @@ async function postQuestionReply(req, res) {
 
 async function postDismissQuestion(req, res) {
   try {
-    const payload = await dismissQuestion(req.params.questionId, req.body);
+    const payload = await dismissQuestion(req.params.questionId, req.body, req);
     res.json(payload);
   } catch (error) {
     handleMercadoLivreError(error, res);
@@ -52,7 +59,7 @@ async function postDismissQuestion(req, res) {
 
 async function postDismissAnsweredQuestions(req, res) {
   try {
-    const payload = await dismissAnsweredQuestions(req.body);
+    const payload = await dismissAnsweredQuestions(req.body, req);
     res.json(payload);
   } catch (error) {
     handleMercadoLivreError(error, res);
@@ -61,7 +68,7 @@ async function postDismissAnsweredQuestions(req, res) {
 
 async function postRefreshQuestions(req, res) {
   try {
-    const payload = await refreshQuestions(req.body);
+    const payload = await refreshQuestions(req.body, req);
     res.json(payload);
   } catch (error) {
     handleMercadoLivreError(error, res);
@@ -70,7 +77,7 @@ async function postRefreshQuestions(req, res) {
 
 async function postSyncQuestions(req, res) {
   try {
-    const payload = await syncQuestions(req.body);
+    const payload = await syncQuestions(req.body, req);
     res.json(payload);
   } catch (error) {
     handleMercadoLivreError(error, res);
@@ -88,25 +95,25 @@ async function handleMercadoLivreWebhook(req, res) {
 
 async function fetchMercadoLivreIntegrationStatus(req, res) {
   try {
-    const payload = await getIntegrationStatus();
+    const payload = await getIntegrationStatus(req);
     res.json(payload);
   } catch (error) {
     handleMercadoLivreError(error, res);
   }
 }
 
-function fetchMercadoLivreAuthorizationUrl(req, res) {
+async function fetchMercadoLivreAuthorizationUrl(req, res) {
   try {
-    const payload = getAuthorizationUrl(req.query);
+    const payload = await getAuthorizationUrl(req.query, req);
     res.json(payload);
   } catch (error) {
     handleMercadoLivreError(error, res);
   }
 }
 
-function startMercadoLivreAuthorization(req, res) {
+async function startMercadoLivreAuthorization(req, res) {
   try {
-    const payload = getAuthorizationUrl(req.query);
+    const payload = await getAuthorizationUrl(req.query, req);
     res.redirect(payload.authorizationUrl);
   } catch (error) {
     handleMercadoLivreError(error, res);
@@ -115,7 +122,110 @@ function startMercadoLivreAuthorization(req, res) {
 
 async function handleMercadoLivreOAuthCallback(req, res) {
   try {
-    const payload = await completeAuthorizationCallback(req.query);
+    const payload = await completeAuthorizationCallback(req.query, req);
+    const acceptsHtml = String(req.headers.accept || "")
+      .toLowerCase()
+      .includes("text/html");
+
+    if (!acceptsHtml) {
+      res.json(payload);
+      return;
+    }
+
+    const frontendBaseUrl = String(process.env.FRONTEND_BASE_URL || "http://localhost:5173")
+      .trim()
+      .replace(/\/$/, "");
+    const redirectTarget = `${frontendBaseUrl}/usuario?tab=integracoes&ml=connected`;
+    const safeRedirectTarget = JSON.stringify(redirectTarget);
+
+    res.setHeader("Content-Type", "text/html; charset=utf-8");
+    res.send(`<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <title>Mercado Livre conectado</title>
+  </head>
+  <body>
+    <p>Conta Mercado Livre conectada. Retornando para o ViiSync...</p>
+    <script>
+      (function () {
+        var target = ${safeRedirectTarget};
+        if (window.opener && !window.opener.closed) {
+          try {
+            window.opener.location.href = target;
+            window.close();
+            return;
+          } catch (error) {
+          }
+        }
+
+        window.location.href = target;
+      })();
+    </script>
+  </body>
+</html>`);
+  } catch (error) {
+    handleMercadoLivreError(error, res);
+  }
+}
+
+async function postMercadoLivreTokenRefresh(req, res) {
+  try {
+    const payload = await refreshIntegrationToken(req);
+    res.json(payload);
+  } catch (error) {
+    handleMercadoLivreError(error, res);
+  }
+}
+
+async function postMercadoLivreDisconnect(req, res) {
+  try {
+    const payload = await disconnectIntegration(req);
+    res.json(payload);
+  } catch (error) {
+    handleMercadoLivreError(error, res);
+  }
+}
+
+async function postSyncOrders(req, res) {
+  try {
+    const payload = await syncOrders(req.body || {}, req);
+    res.json(payload);
+  } catch (error) {
+    handleMercadoLivreError(error, res);
+  }
+}
+
+async function postSyncItems(req, res) {
+  try {
+    const payload = await syncItems(req.body || {}, req);
+    res.json(payload);
+  } catch (error) {
+    handleMercadoLivreError(error, res);
+  }
+}
+
+async function postSyncMarketplaceData(req, res) {
+  try {
+    const payload = await syncMarketplaceData(req.body || {}, req);
+    res.json(payload);
+  } catch (error) {
+    handleMercadoLivreError(error, res);
+  }
+}
+
+async function fetchMercadoLivreOrders(req, res) {
+  try {
+    const payload = await listMarketplaceOrders(req.query, req);
+    res.json(payload);
+  } catch (error) {
+    handleMercadoLivreError(error, res);
+  }
+}
+
+async function fetchMercadoLivreItems(req, res) {
+  try {
+    const payload = await listMarketplaceItems(req.query, req);
     res.json(payload);
   } catch (error) {
     handleMercadoLivreError(error, res);
@@ -148,13 +258,20 @@ module.exports = {
   fetchQuestionById,
   fetchQuestions,
   fetchMercadoLivreAuthorizationUrl,
+  fetchMercadoLivreItems,
   fetchMercadoLivreIntegrationStatus,
+  fetchMercadoLivreOrders,
   handleMercadoLivreWebhook,
   handleMercadoLivreOAuthCallback,
+  postMercadoLivreDisconnect,
+  postMercadoLivreTokenRefresh,
   startMercadoLivreAuthorization,
   postDismissAnsweredQuestions,
   postDismissQuestion,
   postQuestionReply,
   postRefreshQuestions,
+  postSyncItems,
+  postSyncMarketplaceData,
+  postSyncOrders,
   postSyncQuestions,
 };

@@ -1,9 +1,11 @@
 const {
+  createRecurringExpense,
   getAutomations,
   getFinanceCenter,
   getIntegrationHub,
   getOperationalCalendar,
   getProductDetail,
+  removeRecurringExpense,
   toggleAutomationRule,
 } = require("./workspace.service");
 const {
@@ -23,9 +25,9 @@ function sendError(res, error, fallbackMessage) {
   return res.status(500).json({ error: fallbackMessage });
 }
 
-function fetchProductDetail(req, res) {
+async function fetchProductDetail(req, res) {
   try {
-    res.json(getProductDetail(req.params.productId, req.query.period));
+    res.json(await getProductDetail(req.params.productId, req.query.period, req));
   } catch (error) {
     sendError(res, error, "Nao foi possivel carregar o detalhe do produto.");
   }
@@ -36,6 +38,30 @@ async function fetchFinanceCenter(req, res) {
     res.json(await getFinanceCenter(req.query.period, req));
   } catch (error) {
     sendError(res, error, "Nao foi possivel carregar o centro financeiro.");
+  }
+}
+
+async function postRecurringExpense(req, res) {
+  try {
+    res.status(201).json(
+      await createRecurringExpense(req.body, req.body?.period || req.query.period, req)
+    );
+  } catch (error) {
+    sendError(res, error, "Nao foi possivel cadastrar a despesa recorrente.");
+  }
+}
+
+async function deleteRecurringExpense(req, res) {
+  try {
+    res.json(
+      await removeRecurringExpense(
+        req.params.expenseId,
+        req.body?.period || req.query.period,
+        req
+      )
+    );
+  } catch (error) {
+    sendError(res, error, "Nao foi possivel remover a despesa recorrente.");
   }
 }
 
@@ -63,9 +89,9 @@ function postAutomationToggle(req, res) {
   }
 }
 
-function fetchIntegrationHub(req, res) {
+async function fetchIntegrationHub(req, res) {
   try {
-    res.json(getIntegrationHub());
+    res.json(await getIntegrationHub(req));
   } catch (error) {
     sendError(res, error, "Nao foi possivel carregar o hub de integracoes.");
   }
@@ -138,7 +164,9 @@ module.exports = {
   fetchMercadoLivreInvoices,
   fetchOperationalCalendar,
   fetchProductDetail,
+  deleteRecurringExpense,
   postDismissMercadoLivreInvoice,
+  postRecurringExpense,
   postPullMercadoLivreInvoice,
   postPullPendingMercadoLivreInvoices,
   postAutomationToggle,

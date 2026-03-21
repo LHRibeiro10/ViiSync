@@ -1,11 +1,9 @@
-import { useEffect, useRef, useState } from "react";
-import { NavLink, useLocation, useOutlet } from "react-router-dom";
+import { useEffect, useMemo, useState } from "react";
+import { NavLink, useLocation, useNavigate, useOutlet } from "react-router-dom";
 import BrandLogo from "./BrandLogo";
 import AssistantPanel from "./AssistantPanel";
 import SellerOnboardingGuide from "./SellerOnboardingGuide";
-
-const PAGE_TRANSITION_DURATION_MS = 220;
-const PAGE_TRANSITION_EXIT_MS = 110;
+import { useAuthSession } from "../contexts/useAuthSession";
 
 function MenuIcon() {
   return (
@@ -42,37 +40,24 @@ const primaryNavigationItems = [
   { to: "/financeiro", label: "Financeiro" },
   { to: "/mercado-livre/perguntas", label: "Perguntas ML" },
   { to: "/relatorios", label: "Relatorios" },
+  { to: "/usuario", label: "Usuario" },
   { to: "/configuracoes", label: "Configuracoes" },
 ];
 
 function AppLayout() {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const navigate = useNavigate();
   const location = useLocation();
   const outlet = useOutlet();
-  const [displayedOutlet, setDisplayedOutlet] = useState(outlet);
-  const [displayedPathname, setDisplayedPathname] = useState(location.pathname);
-  const [transitionStage, setTransitionStage] = useState("is-entering");
-  const pendingOutletRef = useRef(outlet);
-  const pendingPathnameRef = useRef(location.pathname);
+  const { user, clearSession } = useAuthSession();
+  const isAdmin = String(user?.role || "").toUpperCase() === "ADMIN";
+  const visibleNavigationItems = useMemo(() => {
+    if (!isAdmin) {
+      return primaryNavigationItems;
+    }
 
-  useEffect(() => {
-    pendingOutletRef.current = outlet;
-    pendingPathnameRef.current = location.pathname;
-  }, [location.pathname, outlet]);
-
-  useEffect(() => {
-    const enterTimeoutId = window.setTimeout(() => {
-      setTransitionStage("");
-    }, PAGE_TRANSITION_DURATION_MS);
-
-    return () => {
-      window.clearTimeout(enterTimeoutId);
-    };
-  }, []);
-
-  useEffect(() => {
-    setIsSidebarOpen(false);
-  }, [location.pathname]);
+    return [...primaryNavigationItems, { to: "/admin", label: "Admin" }];
+  }, [isAdmin]);
 
   useEffect(() => {
     if (!isSidebarOpen) {
@@ -116,28 +101,15 @@ function AppLayout() {
     };
   }, []);
 
-  useEffect(() => {
-    if (location.pathname === displayedPathname) {
-      return undefined;
-    }
+  function handleSidebarNavigation() {
+    setIsSidebarOpen(false);
+  }
 
-    setTransitionStage("is-exiting");
-
-    const exitTimeoutId = window.setTimeout(() => {
-      setDisplayedOutlet(pendingOutletRef.current);
-      setDisplayedPathname(pendingPathnameRef.current);
-      setTransitionStage("is-entering");
-    }, PAGE_TRANSITION_EXIT_MS);
-
-    const enterTimeoutId = window.setTimeout(() => {
-      setTransitionStage("");
-    }, PAGE_TRANSITION_EXIT_MS + PAGE_TRANSITION_DURATION_MS);
-
-    return () => {
-      window.clearTimeout(exitTimeoutId);
-      window.clearTimeout(enterTimeoutId);
-    };
-  }, [displayedOutlet, displayedPathname, location.pathname]);
+  async function handleLogout() {
+    await clearSession();
+    setIsSidebarOpen(false);
+    navigate("/login", { replace: true });
+  }
 
   return (
     <div className={`page ${isSidebarOpen ? "sidebar-open" : ""}`}>
@@ -170,11 +142,12 @@ function AppLayout() {
               <span className="sidebar-section-label">Operacao</span>
 
               <nav className="menu">
-                {primaryNavigationItems.map((item) => (
+                {visibleNavigationItems.map((item) => (
                   <NavLink
                     key={item.to}
                     to={item.to}
                     end={item.end}
+                    onClick={handleSidebarNavigation}
                     className={({ isActive }) => `menu-item ${isActive ? "active" : ""}`}
                   >
                     {item.label}
@@ -182,15 +155,19 @@ function AppLayout() {
                 ))}
               </nav>
             </div>
+
+            <div className="sidebar-session-actions">
+              <button
+                type="button"
+                className="sidebar-logout-button"
+                onClick={handleLogout}
+              >
+                Encerrar sessao
+              </button>
+            </div>
           </div>
         </div>
 
-        <div className="plan-card">
-          <div className="plan-badge">Plano atual</div>
-          <h3>Plano Fundador</h3>
-          <p>1 conta ativa com foco em operacao, margem e acompanhamento centralizado.</p>
-          <button>Fazer upgrade</button>
-        </div>
       </aside>
 
       <main className="content">
@@ -209,16 +186,9 @@ function AppLayout() {
 
         <div
           className="page-transition-shell"
-          style={{
-            "--page-transition-duration": `${PAGE_TRANSITION_DURATION_MS}ms`,
-            "--page-transition-exit-duration": `${PAGE_TRANSITION_EXIT_MS}ms`,
-          }}
         >
-          <div
-            key={displayedPathname}
-            className={`page-transition-view ${transitionStage}`.trim()}
-          >
-            {displayedOutlet}
+          <div key={location.pathname} className="page-transition-view">
+            {outlet}
           </div>
         </div>
 

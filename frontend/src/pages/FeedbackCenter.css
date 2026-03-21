@@ -3,6 +3,9 @@
   flex-direction: column;
   gap: 22px;
 }
+.feedback-page.is-embedded {
+  gap: 18px;
+}
 
 .feedback-summary-grid,
 .feedback-grid {
@@ -214,6 +217,25 @@
   margin: 10px 0 0;
   color: #475569;
   line-height: 1.7;
+}
+
+.feedback-admin-response {
+  margin-top: 14px;
+  padding: 14px 16px;
+  border-radius: 14px;
+  border: 1px solid rgba(59, 130, 246, 0.2);
+  background: rgba(239, 246, 255, 0.85);
+}
+
+.feedback-admin-response strong {
+  font-size: 14px;
+}
+
+.feedback-admin-response span {
+  display: block;
+  margin-top: 8px;
+  color: #475569;
+  font-size: 13px;
 }
 
 .feedback-badge.is-danger {

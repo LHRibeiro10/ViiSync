@@ -567,7 +567,7 @@ async function loginUser(payload = {}, request = {}) {
     throw new AuthUnauthorizedError("E-mail ou senha invalidos.");
   }
 
-  if (user.status === "SUSPENDED") {
+  if (user.status === "SUSPENDED" || user.blockedAt) {
     throw new AuthUnauthorizedError("Sua conta esta suspensa no momento.");
   }
 
@@ -628,6 +628,10 @@ async function resolveSessionContextByToken(token) {
   });
 
   if (!session || !session.user) {
+    return null;
+  }
+
+  if (session.user.status === "SUSPENDED" || session.user.blockedAt) {
     return null;
   }
 

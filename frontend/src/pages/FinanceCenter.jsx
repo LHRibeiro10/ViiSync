@@ -1,13 +1,15 @@
 import { useEffect, useState } from "react";
 import PageHeader from "../components/PageHeader";
-import { useAnalyticsPeriod } from "../contexts/AnalyticsPeriodContext";
+import { useAnalyticsPeriod } from "../contexts/useAnalyticsPeriod";
 import {
+  createRecurringFinanceExpense,
   dismissMercadoLivreInvoice,
   downloadMercadoLivreInvoiceDocument,
   getFinanceCenter,
   getMercadoLivreInvoices,
   pullMercadoLivreInvoice,
   pullPendingMercadoLivreInvoices,
+  removeRecurringFinanceExpense,
 } from "../services/api";
 import {
   formatCurrency,
@@ -28,6 +30,23 @@ function triggerDocumentDownload(blob, fileName) {
   window.URL.revokeObjectURL(objectUrl);
 }
 
+function parseRecurringAmount(value) {
+  const text = String(value || "").trim();
+  if (!text) {
+    return 0;
+  }
+
+  if (text.includes(",")) {
+    const normalized = text.replace(/[^\d,.-]/g, "").replace(/\./g, "").replace(",", ".");
+    const parsed = Number(normalized);
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
+
+  const normalized = text.replace(/[^\d.-]/g, "");
+  const parsed = Number(normalized);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
 function FinanceCenter() {
   const { selectedPeriod, setSelectedPeriod } = useAnalyticsPeriod();
   const [payload, setPayload] = useState(null);
@@ -40,6 +59,16 @@ function FinanceCenter() {
   const [busyInvoiceId, setBusyInvoiceId] = useState("");
   const [downloadingDocumentKey, setDownloadingDocumentKey] = useState("");
   const [dismissingInvoiceId, setDismissingInvoiceId] = useState("");
+  const [recurringExpenseForm, setRecurringExpenseForm] = useState({
+    description: "",
+    value: "",
+    category: "Operacao",
+    dueDay: "5",
+  });
+  const [recurringExpenseError, setRecurringExpenseError] = useState("");
+  const [recurringExpenseFeedback, setRecurringExpenseFeedback] = useState("");
+  const [savingRecurringExpense, setSavingRecurringExpense] = useState(false);
+  const [removingRecurringExpenseId, setRemovingRecurringExpenseId] = useState("");
 
   useEffect(() => {
     let isCancelled = false;
@@ -48,6 +77,8 @@ function FinanceCenter() {
       setError("");
       setInvoiceError("");
       setInvoiceFeedback("");
+      setRecurringExpenseError("");
+      setRecurringExpenseFeedback("");
       setLoading(true);
 
       const [financeResult, invoicesResult] = await Promise.allSettled([
@@ -88,7 +119,7 @@ function FinanceCenter() {
       const response = await pullPendingMercadoLivreInvoices(selectedPeriod);
       setInvoicePayload(response);
       setInvoiceFeedback(response.message || "NFes pendentes atualizadas.");
-    } catch (err) {
+    } catch {
       setInvoiceError("Nao foi possivel puxar as NFes pendentes do Mercado Livre.");
     } finally {
       setPullingAllInvoices(false);
@@ -127,7 +158,7 @@ function FinanceCenter() {
         };
       });
       setInvoiceFeedback(response.message || "NFe puxada com sucesso.");
-    } catch (err) {
+    } catch {
       setInvoiceError("Nao foi possivel puxar essa NFe do Mercado Livre.");
     } finally {
       setBusyInvoiceId("");
@@ -147,7 +178,7 @@ function FinanceCenter() {
           ? "XML baixado no dispositivo."
           : "PDF / DANFE baixado no dispositivo."
       );
-    } catch (err) {
+    } catch {
       setInvoiceError(
         format === "xml"
           ? "Nao foi possivel baixar o XML dessa NFe."
@@ -165,10 +196,99 @@ function FinanceCenter() {
       const response = await dismissMercadoLivreInvoice(invoiceId, selectedPeriod);
       setInvoicePayload(response);
       setInvoiceFeedback(response.message || "NFe removida da lista.");
-    } catch (err) {
+    } catch {
       setInvoiceError("Nao foi possivel excluir essa NFe da lista.");
     } finally {
       setDismissingInvoiceId("");
+    }
+  }
+
+  function handleRecurringExpenseFieldChange(event) {
+    const { name, value } = event.target;
+
+    setRecurringExpenseForm((currentForm) => ({
+      ...currentForm,
+      [name]: value,
+    }));
+
+    if (recurringExpenseError) {
+      setRecurringExpenseError("");
+    }
+  }
+
+  async function handleCreateRecurringExpense(event) {
+    event.preventDefault();
+
+    const description = recurringExpenseForm.description.trim();
+    const amount = parseRecurringAmount(recurringExpenseForm.value);
+    const category = recurringExpenseForm.category.trim() || "Operacao";
+    const dueDay = Number(recurringExpenseForm.dueDay);
+
+    if (!description) {
+      setRecurringExpenseError("Informe a descricao do gasto recorrente.");
+      return;
+    }
+
+    if (amount <= 0) {
+      setRecurringExpenseError("Informe um valor valido maior que zero.");
+      return;
+    }
+
+    if (!Number.isInteger(dueDay) || dueDay < 1 || dueDay > 31) {
+      setRecurringExpenseError("Informe um dia de vencimento entre 1 e 31.");
+      return;
+    }
+
+    try {
+      setSavingRecurringExpense(true);
+      setRecurringExpenseError("");
+      setRecurringExpenseFeedback("");
+
+      const response = await createRecurringFinanceExpense(
+        {
+          description,
+          amount,
+          category,
+          dueDay,
+        },
+        selectedPeriod
+      );
+
+      setPayload(response);
+      setRecurringExpenseForm((currentForm) => ({
+        ...currentForm,
+        description: "",
+        value: "",
+      }));
+      setRecurringExpenseFeedback(
+        response.message || "Despesa recorrente cadastrada com sucesso."
+      );
+    } catch (err) {
+      setRecurringExpenseError(
+        err.message || "Nao foi possivel cadastrar essa despesa recorrente."
+      );
+    } finally {
+      setSavingRecurringExpense(false);
+    }
+  }
+
+  async function handleRemoveRecurringExpense(expenseId) {
+    try {
+      setRemovingRecurringExpenseId(expenseId);
+      setRecurringExpenseError("");
+      setRecurringExpenseFeedback("");
+
+      const response = await removeRecurringFinanceExpense(expenseId, selectedPeriod);
+      setPayload(response);
+      setRecurringExpenseFeedback(
+        response.message || "Despesa recorrente removida com sucesso."
+      );
+    } catch (err) {
+      setRecurringExpenseError(
+        err.message || "Nao foi possivel remover essa despesa recorrente."
+      );
+    } finally {
+      setRemovingRecurringExpenseId("");
     }
   }
 
@@ -230,8 +350,8 @@ function FinanceCenter() {
         <div>
           <h2>NFes Mercado Livre</h2>
           <p>
-            Estrutura pronta para buscar NFes geradas pela API do Mercado Livre
-            via backend. Hoje esse fluxo roda em mock local.
+            Acompanhe NFes sincronizadas do canal Mercado Livre e mantenha os
+            documentos fiscais da operacao organizados.
           </p>
         </div>
 
@@ -503,25 +623,101 @@ function FinanceCenter() {
               </div>
             </div>
 
+            <form className="finance-recurring-form" onSubmit={handleCreateRecurringExpense}>
+              <label>
+                <span>Descricao</span>
+                <input
+                  type="text"
+                  name="description"
+                  value={recurringExpenseForm.description}
+                  onChange={handleRecurringExpenseFieldChange}
+                  placeholder="Ex.: ERP fiscal"
+                />
+              </label>
+
+              <label>
+                <span>Valor mensal</span>
+                <input
+                  type="text"
+                  name="value"
+                  inputMode="decimal"
+                  value={recurringExpenseForm.value}
+                  onChange={handleRecurringExpenseFieldChange}
+                  placeholder="0,00"
+                />
+              </label>
+
+              <label>
+                <span>Categoria</span>
+                <input
+                  type="text"
+                  name="category"
+                  value={recurringExpenseForm.category}
+                  onChange={handleRecurringExpenseFieldChange}
+                  placeholder="Operacao"
+                />
+              </label>
+
+              <label>
+                <span>Dia de vencimento</span>
+                <input
+                  type="number"
+                  name="dueDay"
+                  min="1"
+                  max="31"
+                  value={recurringExpenseForm.dueDay}
+                  onChange={handleRecurringExpenseFieldChange}
+                />
+              </label>
+
+              <button type="submit" disabled={savingRecurringExpense}>
+                {savingRecurringExpense ? "Salvando..." : "Adicionar gasto fixo"}
+              </button>
+            </form>
+
+            {recurringExpenseError ? (
+              <div className="finance-inline-alert">{recurringExpenseError}</div>
+            ) : null}
+
+            {recurringExpenseFeedback ? (
+              <div className="finance-inline-note">{recurringExpenseFeedback}</div>
+            ) : null}
+
             <div
               className={`finance-list ui-scroll-region ${
                 shouldScrollRecurringExpenses ? "is-scrollable scroll-region-medium" : ""
               }`}
             >
-              {payload.recurringExpenses.map((expense) => (
-                <div key={expense.id} className="finance-list-item">
-                  <div>
-                    <strong>{expense.description}</strong>
-                    <p>
-                      {expense.category} | vence em {formatDate(expense.nextCharge)}
-                    </p>
+              {payload.recurringExpenses.length ? (
+                payload.recurringExpenses.map((expense) => (
+                  <div key={expense.id} className="finance-list-item">
+                    <div>
+                      <strong>{expense.description}</strong>
+                      <p>
+                        {expense.category} | vence em {formatDate(expense.nextCharge)}
+                      </p>
+                    </div>
+                    <div className="finance-list-values">
+                      <span>{expense.status}</span>
+                      <strong>{formatCurrency(expense.amount)}</strong>
+                      <button
+                        type="button"
+                        className="finance-recurring-remove"
+                        onClick={() => handleRemoveRecurringExpense(expense.id)}
+                        disabled={removingRecurringExpenseId === expense.id}
+                      >
+                        {removingRecurringExpenseId === expense.id
+                          ? "Removendo..."
+                          : "Remover gasto"}
+                      </button>
+                    </div>
                   </div>
-                  <div className="finance-list-values">
-                    <span>{expense.status}</span>
-                    <strong>{formatCurrency(expense.amount)}</strong>
-                  </div>
+                ))
+              ) : (
+                <div className="finance-empty-state">
+                  Nenhuma despesa recorrente cadastrada ainda.
                 </div>
-              ))}
+              )}
             </div>
           </section>
 

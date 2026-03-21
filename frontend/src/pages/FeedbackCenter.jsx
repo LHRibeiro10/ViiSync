@@ -18,7 +18,7 @@ const initialForm = {
   message: "",
 };
 
-function FeedbackCenter() {
+function FeedbackCenter({ embedded = false }) {
   const location = useLocation();
   const [payload, setPayload] = useState(null);
   const [filters, setFilters] = useState({
@@ -43,7 +43,7 @@ function FeedbackCenter() {
         if (!isCancelled) {
           setPayload(response);
         }
-      } catch (err) {
+      } catch {
         if (!isCancelled) {
           setError("Nao foi possivel carregar seu historico de feedback agora.");
         }
@@ -132,12 +132,14 @@ function FeedbackCenter() {
   }
 
   return (
-    <div className="feedback-page">
-      <PageHeader
-        tag="Canal aberto"
-        title="Feedbacks e reclamacoes"
-        description="Envie bugs, ideias e reclamacoes direto para o time do ViiSync e acompanhe o andamento sem sair do produto."
-      />
+    <div className={`feedback-page ${embedded ? "is-embedded" : ""}`}>
+      {embedded ? null : (
+        <PageHeader
+          tag="Canal aberto"
+          title="Feedbacks e reclamacoes"
+          description="Envie bugs, ideias e reclamacoes direto para o time do ViiSync e acompanhe o andamento sem sair do produto."
+        />
+      )}
 
       <div className="feedback-summary-grid">
         {summaryCards.map((card) => (
@@ -221,7 +223,7 @@ function FeedbackCenter() {
             <div className="feedback-panel-header">
               <div>
                 <h2>Contexto do remetente</h2>
-                <p>Enquanto nao houver login real, usamos o seller mockado atual do sistema.</p>
+                <p>Dados da sua conta autenticada para rastreabilidade do envio.</p>
               </div>
             </div>
 
@@ -312,6 +314,18 @@ function FeedbackCenter() {
                       <span>{item.areaLabel}</span>
                       <span>{formatFeedbackDateTime(item.createdAt)}</span>
                     </div>
+
+                    {item.adminResponse || item.resolutionEta ? (
+                      <div className="feedback-admin-response">
+                        <strong>Retorno do time</strong>
+                        {item.adminResponse ? <p>{item.adminResponse}</p> : null}
+                        {item.resolutionEta ? (
+                          <span>
+                            Previsao informada: {formatFeedbackDateTime(item.resolutionEta)}
+                          </span>
+                        ) : null}
+                      </div>
+                    ) : null}
                   </article>
                 ))}
               </div>

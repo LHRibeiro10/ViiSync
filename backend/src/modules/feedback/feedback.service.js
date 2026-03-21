@@ -1,5 +1,7 @@
-const feedbackSeed = require("../../data/mockFeedbackInbox");
-const { getSettings } = require("../../services/analyticsDb.service");
+const { randomUUID } = require("crypto");
+
+const prisma = require("../../lib/prisma");
+const { resolveSessionContextFromRequest } = require("../auth/auth.service");
 
 const VALID_TYPES = ["feedback", "complaint", "bug", "feature"];
 const VALID_STATUSES = ["new", "in_review", "resolved"];
@@ -47,13 +49,39 @@ const AREA_LABELS = {
   general: "Geral",
 };
 
-let feedbackStore = cloneData(feedbackSeed);
-
-function cloneData(value) {
-  return JSON.parse(JSON.stringify(value));
-}
+const feedbackTicketInclude = {
+  user: {
+    select: {
+      id: true,
+      name: true,
+      email: true,
+      memberships: {
+        select: {
+          organization: {
+            select: {
+              name: true,
+            },
+          },
+        },
+        orderBy: {
+          createdAt: "asc",
+        },
+        take: 1,
+      },
+    },
+  },
+  history: {
+    orderBy: {
+      createdAt: "asc",
+    },
+  },
+};
 
 function normalizeText(value) {
+  return String(value ?? "").trim();
+}
+
+function normalizeSearchText(value) {
   return String(value ?? "")
     .toLowerCase()
     .normalize("NFD")
@@ -90,13 +118,15 @@ function getPriorityTone(priority) {
   return "neutral";
 }
 
-async function resolveSellerProfile(request = {}) {
-  const settings = await getSettings(request);
+function resolveSellerCompany(user) {
+  return user?.memberships?.[0]?.organization?.name || "Operacao atual";
+}
 
+function resolveSellerProfile(user) {
   return {
-    name: settings.profile.name,
-    email: settings.profile.email,
-    company: settings.profile.company,
+    name: user?.name || "Seller",
+    email: user?.email || "",
+    company: resolveSellerCompany(user),
   };
 }
 
@@ -138,37 +168,54 @@ function matchesFilters(item, filters) {
   }
 
   const haystack = [
-    item.id,
+    item.ticketCode,
     item.subject,
     item.message,
-    item.submittedBy?.name,
-    item.submittedBy?.company,
+    item.user?.name,
+    item.user?.email,
+    resolveSellerCompany(item.user),
     AREA_LABELS[item.area],
   ]
     .filter(Boolean)
-    .map(normalizeText)
+    .map(normalizeSearchText)
     .join(" ");
 
-  return haystack.includes(normalizeText(filters.search));
-}
-
-function sortByNewest(items) {
-  return [...items].sort((left, right) => {
-    return new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime();
-  });
+  return haystack.includes(normalizeSearchText(filters.search));
 }
 
 function mapHistoryEntry(entry) {
   return {
-    ...cloneData(entry),
+    id: entry.id,
+    status: entry.status,
+    note: entry.note,
+    actorType: entry.actorType,
+    responseText: entry.responseText || null,
+    resolutionEta: entry.resolutionEta ? entry.resolutionEta.toISOString() : null,
+    createdAt: entry.createdAt.toISOString(),
     statusLabel: STATUS_LABELS[entry.status] || entry.status,
     statusTone: getStatusTone(entry.status),
   };
 }
 
 function mapFeedbackItem(item) {
+  const submittedBy = resolveSellerProfile(item.user);
+
   return {
-    ...cloneData(item),
+    id: item.ticketCode,
+    internalId: item.id,
+    type: item.type,
+    area: item.area,
+    subject: item.subject,
+    message: item.message,
+    status: item.status,
+    priority: item.priority,
+    sourcePath: item.sourcePath,
+    adminResponse: item.adminResponse || null,
+    resolutionEta: item.resolutionEta ? item.resolutionEta.toISOString() : null,
+    resolvedAt: item.resolvedAt ? item.resolvedAt.toISOString() : null,
+    createdAt: item.createdAt.toISOString(),
+    updatedAt: item.updatedAt.toISOString(),
+    submittedBy,
     typeLabel: TYPE_LABELS[item.type] || item.type,
     statusLabel: STATUS_LABELS[item.status] || item.status,
     priorityLabel: PRIORITY_LABELS[item.priority] || item.priority,
@@ -190,53 +237,7 @@ function buildMeta(allItems, filteredItems) {
     inReviewCount: allItems.filter((item) => item.status === "in_review").length,
     resolvedCount: allItems.filter((item) => item.status === "resolved").length,
     highPriorityCount: allItems.filter((item) => item.priority === "high").length,
-    latestAt: allItems[0]?.createdAt || null,
-  };
-}
-
-async function getScopedSellerItems(request = {}) {
-  const sellerProfile = await resolveSellerProfile(request);
-
-  return sortByNewest(
-    feedbackStore.filter((item) => item.submittedBy?.company === sellerProfile.company)
-  );
-}
-
-async function listFeedback(filters = {}, request = {}) {
-  const resolvedFilters = resolveFilters(filters);
-  const sellerProfile = await resolveSellerProfile(request);
-  const scopedItems = await getScopedSellerItems(request);
-  const filteredItems = scopedItems.filter((item) => matchesFilters(item, resolvedFilters));
-
-  return {
-    seller: sellerProfile,
-    filters: resolvedFilters,
-    meta: buildMeta(scopedItems, filteredItems),
-    items: filteredItems.map(mapFeedbackItem),
-  };
-}
-
-function listAdminFeedback(filters = {}) {
-  const resolvedFilters = resolveFilters(filters);
-  const allItems = sortByNewest(feedbackStore);
-  const filteredItems = allItems.filter((item) => matchesFilters(item, resolvedFilters));
-
-  return {
-    filters: resolvedFilters,
-    meta: buildMeta(allItems, filteredItems),
-    items: filteredItems.map(mapFeedbackItem),
-  };
-}
-
-function getAdminFeedbackById(feedbackId) {
-  const feedbackItem = feedbackStore.find((item) => item.id === feedbackId);
-
-  if (!feedbackItem) {
-    throw createHttpError(404, "Feedback nao encontrado.");
-  }
-
-  return {
-    item: mapFeedbackItem(feedbackItem),
+    latestAt: allItems[0]?.createdAt?.toISOString?.() || null,
   };
 }
 
@@ -245,7 +246,7 @@ function resolvePriority(type, message, customPriority) {
     return customPriority;
   }
 
-  const normalizedMessage = normalizeText(message);
+  const normalizedMessage = normalizeSearchText(message);
 
   if (
     type === "bug" ||
@@ -264,21 +265,136 @@ function resolvePriority(type, message, customPriority) {
   return "low";
 }
 
-function buildNextId() {
-  const maxNumericId = feedbackStore.reduce((highestValue, item) => {
-    const numericPart = Number(String(item.id).replace(/[^\d]/g, ""));
-    return Number.isFinite(numericPart) ? Math.max(highestValue, numericPart) : highestValue;
-  }, 1200);
+function buildTicketCode() {
+  const uniqueSeed = randomUUID().replace(/-/g, "").slice(0, 10).toUpperCase();
+  return `FDB-${uniqueSeed}`;
+}
 
-  return `FDB-${maxNumericId + 1}`;
+function parseResolutionEta(value) {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  if (value === null || String(value).trim() === "") {
+    return null;
+  }
+
+  const parsed = new Date(value);
+
+  if (Number.isNaN(parsed.getTime())) {
+    throw createHttpError(400, "Informe uma previsao valida para o retorno.");
+  }
+
+  return parsed;
+}
+
+async function resolveViewerUser(request = {}) {
+  const sessionContext = await resolveSessionContextFromRequest(request);
+
+  if (!sessionContext?.user?.id) {
+    throw createHttpError(401, "Sessao invalida ou expirada.");
+  }
+
+  const found = await prisma.user.findUnique({
+    where: {
+      id: sessionContext.user.id,
+    },
+    select: {
+      id: true,
+      name: true,
+      email: true,
+      memberships: {
+        select: {
+          organization: {
+            select: {
+              name: true,
+            },
+          },
+        },
+        orderBy: {
+          createdAt: "asc",
+        },
+        take: 1,
+      },
+    },
+  });
+
+  if (!found) {
+    throw createHttpError(401, "Sessao invalida ou expirada.");
+  }
+
+  return found;
+}
+
+async function listTicketRows(where = {}) {
+  return prisma.feedbackTicket.findMany({
+    where,
+    include: feedbackTicketInclude,
+    orderBy: {
+      createdAt: "desc",
+    },
+  });
+}
+
+async function listFeedback(filters = {}, request = {}) {
+  const user = await resolveViewerUser(request);
+  const resolvedFilters = resolveFilters(filters);
+  const scopedItems = await listTicketRows({ userId: user.id });
+  const filteredItems = scopedItems.filter((item) => matchesFilters(item, resolvedFilters));
+
+  return {
+    seller: resolveSellerProfile(user),
+    filters: resolvedFilters,
+    meta: buildMeta(scopedItems, filteredItems),
+    items: filteredItems.map(mapFeedbackItem),
+  };
+}
+
+async function listAdminFeedback(filters = {}) {
+  const resolvedFilters = resolveFilters(filters);
+  const allItems = await listTicketRows();
+  const filteredItems = allItems.filter((item) => matchesFilters(item, resolvedFilters));
+
+  return {
+    filters: resolvedFilters,
+    meta: buildMeta(allItems, filteredItems),
+    items: filteredItems.map(mapFeedbackItem),
+  };
+}
+
+async function findTicketByPublicId(feedbackId) {
+  const identifier = normalizeText(feedbackId);
+
+  if (!identifier) {
+    throw createHttpError(400, "Feedback invalido.");
+  }
+
+  return prisma.feedbackTicket.findFirst({
+    where: {
+      OR: [{ ticketCode: identifier }, { id: identifier }],
+    },
+    include: feedbackTicketInclude,
+  });
+}
+
+async function getAdminFeedbackById(feedbackId) {
+  const item = await findTicketByPublicId(feedbackId);
+
+  if (!item) {
+    throw createHttpError(404, "Feedback nao encontrado.");
+  }
+
+  return {
+    item: mapFeedbackItem(item),
+  };
 }
 
 async function createFeedback(payload = {}, request = {}) {
   const type = VALID_TYPES.includes(payload.type) ? payload.type : "feedback";
   const area = VALID_AREAS.includes(payload.area) ? payload.area : "general";
-  const subject = String(payload.subject ?? "").trim();
-  const message = String(payload.message ?? "").trim();
-  const sellerProfile = await resolveSellerProfile(request);
+  const subject = normalizeText(payload.subject);
+  const message = normalizeText(payload.message);
+  const user = await resolveViewerUser(request);
 
   if (subject.length < 8) {
     throw createHttpError(400, "Informe um assunto com pelo menos 8 caracteres.");
@@ -288,77 +404,122 @@ async function createFeedback(payload = {}, request = {}) {
     throw createHttpError(400, "Descreva o contexto com pelo menos 24 caracteres.");
   }
 
-  const now = new Date().toISOString();
-  const nextId = buildNextId();
-  const item = {
-    id: nextId,
-    type,
-    area,
-    subject,
-    message,
-    status: "new",
-    priority: resolvePriority(type, message, payload.priority),
-    sourcePath: String(payload.currentPath ?? "/feedback"),
-    createdAt: now,
-    updatedAt: now,
-    submittedBy: sellerProfile,
-    history: [
-      {
-        id: `${nextId}-event-1`,
+  const priority = resolvePriority(type, message, payload.priority);
+  const ticketCode = buildTicketCode();
+  const now = new Date();
+
+  const item = await prisma.$transaction(async (tx) => {
+    const created = await tx.feedbackTicket.create({
+      data: {
+        ticketCode,
+        userId: user.id,
+        type,
+        area,
+        subject,
+        message,
+        status: "new",
+        priority,
+        sourcePath: normalizeText(payload.currentPath || "/feedback") || "/feedback",
+      },
+    });
+
+    await tx.feedbackTicketHistory.create({
+      data: {
+        ticketId: created.id,
         status: "new",
         note: "Feedback enviado pelo seller no portal do ViiSync.",
         actorType: "seller",
         createdAt: now,
       },
-    ],
-  };
+    });
 
-  feedbackStore = [item, ...feedbackStore];
+    return tx.feedbackTicket.findUnique({
+      where: {
+        id: created.id,
+      },
+      include: feedbackTicketInclude,
+    });
+  });
+
+  const scopedItems = await listTicketRows({ userId: user.id });
 
   return {
     item: mapFeedbackItem(item),
-    meta: buildMeta(sortByNewest(feedbackStore), sortByNewest(feedbackStore)),
+    meta: buildMeta(scopedItems, scopedItems),
   };
 }
 
-function updateAdminFeedbackStatus(feedbackId, payload = {}) {
+async function updateAdminFeedbackStatus(feedbackId, payload = {}) {
   const nextStatus = VALID_STATUSES.includes(payload.status) ? payload.status : null;
 
   if (!nextStatus) {
     throw createHttpError(400, "Informe um status valido para atualizar o feedback.");
   }
 
-  const feedbackIndex = feedbackStore.findIndex((item) => item.id === feedbackId);
+  const currentItem = await findTicketByPublicId(feedbackId);
 
-  if (feedbackIndex === -1) {
+  if (!currentItem) {
     throw createHttpError(404, "Feedback nao encontrado.");
   }
 
-  const currentItem = feedbackStore[feedbackIndex];
-  const now = new Date().toISOString();
-  const adminNote = String(payload.note ?? "").trim();
-  const historyEntry = {
-    id: `${feedbackId}-event-${currentItem.history.length + 1}`,
-    status: nextStatus,
-    note:
-      adminNote ||
-      (nextStatus === "resolved"
-        ? "Ticket tratado e encerrado pelo time interno."
-        : "Ticket movido pelo time interno para uma nova etapa."),
-    actorType: "admin",
-    createdAt: now,
-  };
+  const adminNote = normalizeText(payload.note);
+  const hasResponsePayload = Object.prototype.hasOwnProperty.call(payload, "response");
+  const responseText = normalizeText(payload.response);
 
-  feedbackStore[feedbackIndex] = {
-    ...currentItem,
-    status: nextStatus,
-    updatedAt: now,
-    history: [...currentItem.history, historyEntry],
-  };
+  if (hasResponsePayload && responseText && responseText.length < 8) {
+    throw createHttpError(400, "A resposta para o seller deve ter pelo menos 8 caracteres.");
+  }
+
+  const etaValue = parseResolutionEta(
+    Object.prototype.hasOwnProperty.call(payload, "resolutionEta")
+      ? payload.resolutionEta
+      : payload.eta
+  );
+
+  const historyNote =
+    adminNote ||
+    (nextStatus === "resolved"
+      ? "Ticket tratado e encerrado pelo time interno."
+      : "Ticket movido pelo time interno para uma nova etapa.");
+
+  const updatedItem = await prisma.$transaction(async (tx) => {
+    const updated = await tx.feedbackTicket.update({
+      where: {
+        id: currentItem.id,
+      },
+      data: {
+        status: nextStatus,
+        resolvedAt: nextStatus === "resolved" ? new Date() : null,
+        ...(hasResponsePayload ? { adminResponse: responseText || null } : {}),
+        ...(etaValue !== undefined ? { resolutionEta: etaValue } : {}),
+      },
+      include: feedbackTicketInclude,
+    });
+
+    await tx.feedbackTicketHistory.create({
+      data: {
+        ticketId: currentItem.id,
+        status: nextStatus,
+        note: historyNote,
+        actorType: "admin",
+        responseText: hasResponsePayload ? responseText || null : null,
+        resolutionEta: etaValue !== undefined ? etaValue : null,
+      },
+    });
+
+    return tx.feedbackTicket.findUnique({
+      where: {
+        id: updated.id,
+      },
+      include: feedbackTicketInclude,
+    });
+  });
+
+  const allItems = await listTicketRows();
 
   return {
-    item: mapFeedbackItem(feedbackStore[feedbackIndex]),
-    meta: buildMeta(sortByNewest(feedbackStore), sortByNewest(feedbackStore)),
+    item: mapFeedbackItem(updatedItem),
+    meta: buildMeta(allItems, allItems),
   };
 }
 

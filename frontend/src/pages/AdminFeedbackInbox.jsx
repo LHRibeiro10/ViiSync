@@ -22,6 +22,8 @@ function AdminFeedbackInbox() {
   const [updating, setUpdating] = useState(false);
   const [error, setError] = useState("");
   const [statusNote, setStatusNote] = useState("");
+  const [responseText, setResponseText] = useState("");
+  const [resolutionEta, setResolutionEta] = useState("");
 
   useEffect(() => {
     let isCancelled = false;
@@ -44,7 +46,7 @@ function AdminFeedbackInbox() {
 
           return response.items[0]?.id || "";
         });
-      } catch (err) {
+      } catch {
         if (!isCancelled) {
           setError("Nao foi possivel carregar a inbox administrativa.");
         }
@@ -65,6 +67,23 @@ function AdminFeedbackInbox() {
   const selectedItem = useMemo(() => {
     return payload?.items?.find((item) => item.id === selectedId) || null;
   }, [payload, selectedId]);
+
+  useEffect(() => {
+    if (!selectedItem) {
+      setStatusNote("");
+      setResponseText("");
+      setResolutionEta("");
+      return;
+    }
+
+    setStatusNote("");
+    setResponseText(selectedItem.adminResponse || "");
+    setResolutionEta(
+      selectedItem.resolutionEta
+        ? new Date(selectedItem.resolutionEta).toISOString().slice(0, 10)
+        : ""
+    );
+  }, [selectedItem]);
 
   const summaryCards = useMemo(() => {
     return [
@@ -103,7 +122,11 @@ function AdminFeedbackInbox() {
       const response = await updateAdminFeedbackStatus(
         selectedItem.id,
         nextStatus,
-        statusNote
+        {
+          note: statusNote,
+          response: responseText,
+          resolutionEta: resolutionEta || null,
+        }
       );
 
       setPayload((currentValue) => {
@@ -123,6 +146,12 @@ function AdminFeedbackInbox() {
         };
       });
       setStatusNote("");
+      setResponseText(response?.item?.adminResponse || responseText);
+      setResolutionEta(
+        response?.item?.resolutionEta
+          ? new Date(response.item.resolutionEta).toISOString().slice(0, 10)
+          : resolutionEta
+      );
     } catch (err) {
       setError(err.message || "Nao foi possivel atualizar o status do ticket.");
     } finally {
@@ -305,7 +334,22 @@ function AdminFeedbackInbox() {
                   <span>Abertura</span>
                   <strong>{formatFeedbackDateTime(selectedItem.createdAt)}</strong>
                 </div>
+                <div>
+                  <span>Previsao atual</span>
+                  <strong>
+                    {selectedItem.resolutionEta
+                      ? formatFeedbackDateTime(selectedItem.resolutionEta)
+                      : "Nao definida"}
+                  </strong>
+                </div>
               </div>
+
+              {selectedItem.adminResponse ? (
+                <div className="admin-feedback-inline-note">
+                  <strong>Retorno ao seller</strong>
+                  <p>{selectedItem.adminResponse}</p>
+                </div>
+              ) : null}
 
               <div className="admin-feedback-status-actions">
                 {feedbackStatusOptions
@@ -322,6 +366,24 @@ function AdminFeedbackInbox() {
                     </button>
                   ))}
               </div>
+
+              <label className="admin-feedback-note-field">
+                <span>Resposta para o seller</span>
+                <textarea
+                  value={responseText}
+                  placeholder="Escreva o retorno que o seller vai enxergar no ticket."
+                  onChange={(event) => setResponseText(event.target.value)}
+                />
+              </label>
+
+              <label className="admin-feedback-note-field">
+                <span>Previsao de resolucao</span>
+                <input
+                  type="date"
+                  value={resolutionEta}
+                  onChange={(event) => setResolutionEta(event.target.value)}
+                />
+              </label>
 
               <label className="admin-feedback-note-field">
                 <span>Nota interna</span>

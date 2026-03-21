@@ -25,7 +25,7 @@ function OperationsCalendar() {
         if (!isCancelled) {
           setPayload(response);
         }
-      } catch (err) {
+      } catch {
         if (!isCancelled) {
           setError("Nao foi possivel carregar o calendario operacional.");
         }

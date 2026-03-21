@@ -4,6 +4,10 @@
   gap: 22px;
 }
 
+.integrations-page.is-embedded {
+  gap: 18px;
+}
+
 .integrations-summary-grid,
 .integrations-layout,
 .integrations-account-grid {
