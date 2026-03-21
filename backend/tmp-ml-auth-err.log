@@ -1,0 +1,20 @@
+[auth] PrismaClientKnownRequestError: 
+Invalid `prisma.user.findUnique()` invocation in
+C:\Users\luizi\OneDrive\Desktop\Viisync (1)\Viisync\Viisync\backend\src\modules\auth\auth.service.js:404:22
+
+  401 }
+  402 
+  403 async function fetchUserWithMembershipByEmail(email) {
+→ 404   return prisma.user.findUnique(
+
+    at Gr.handleRequestError (C:\Users\luizi\OneDrive\Desktop\Viisync (1)\Viisync\Viisync\backend\node_modules\@prisma\client\runtime\client.js:65:8286)
+    at Gr.handleAndLogRequestError (C:\Users\luizi\OneDrive\Desktop\Viisync (1)\Viisync\Viisync\backend\node_modules\@prisma\client\runtime\client.js:65:7581)
+    at Gr.request (C:\Users\luizi\OneDrive\Desktop\Viisync (1)\Viisync\Viisync\backend\node_modules\@prisma\client\runtime\client.js:65:7288)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async a (C:\Users\luizi\OneDrive\Desktop\Viisync (1)\Viisync\Viisync\backend\node_modules\@prisma\client\runtime\client.js:75:6730)
+    at async loginUser (C:\Users\luizi\OneDrive\Desktop\Viisync (1)\Viisync\Viisync\backend\src\modules\auth\auth.service.js:560:16)
+    at async postLogin (C:\Users\luizi\OneDrive\Desktop\Viisync (1)\Viisync\Viisync\backend\src\modules\auth\auth.controller.js:21:21) {
+  code: 'EACCES',
+  meta: { modelName: 'User' },
+  clientVersion: '7.5.0'
+}

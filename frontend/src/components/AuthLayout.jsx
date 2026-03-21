@@ -4,26 +4,26 @@ import "./AuthLayout.css";
 
 const authHighlights = [
   {
-    title: "Operacao centralizada",
+    title: "Operacao unificada",
     description:
-      "Vendas, margem, perguntas de marketplace e desempenho em um unico fluxo.",
+      "Pedidos, produtos, atendimento e indicadores em um unico ambiente de gestao.",
   },
   {
-    title: "Visao financeira acionavel",
+    title: "Visao financeira clara",
     description:
-      "Indicadores claros para decidir preco, custo, canal e prioridade operacional.",
+      "Acompanhe receita, custos e margem com foco em decisao e previsibilidade.",
   },
   {
-    title: "Estrutura pronta para escalar",
+    title: "Estrutura profissional",
     description:
-      "As telas ja nascem separadas para seller, backoffice e integracoes futuras.",
+      "Fluxos organizados para seller e administracao, com base preparada para evolucao.",
   },
 ];
 
 const authStats = [
-  { label: "Tempo medio poupado", value: "6,4 h/sem" },
-  { label: "Canais monitorados", value: "5 fontes" },
-  { label: "Painel administrativo", value: "backoffice pronto" },
+  { label: "Ambiente seguro", value: "Acesso protegido" },
+  { label: "Visao operacional", value: "Gestao centralizada" },
+  { label: "Controle de contas", value: "Governanca ativa" },
 ];
 
 function AuthLayout() {
@@ -31,8 +31,8 @@ function AuthLayout() {
     <div className="auth-shell">
       <section className="auth-hero">
         <div className="auth-hero-topline">
-          <span className="auth-hero-pill">Acesso ViiSync</span>
-          <span className="auth-hero-link">Ambiente seguro</span>
+          <span className="auth-hero-pill">Plataforma ViiSync</span>
+          <span className="auth-hero-link">Acesso corporativo</span>
         </div>
 
         <div className="auth-hero-logo-box">
@@ -40,10 +40,10 @@ function AuthLayout() {
         </div>
 
         <div className="auth-hero-copy">
-          <h1>Entre no ViiSync com uma experiencia de produto mais madura.</h1>
+          <h1>Gestao profissional para sellers em um unico painel.</h1>
           <p>
-            Essas telas ja separam claramente o fluxo publico de acesso do painel
-            principal do seller e do backoffice administrativo.
+            Acesse sua conta para acompanhar operacao, desempenho e indicadores
+            essenciais com consistencia e seguranca.
           </p>
         </div>
 
