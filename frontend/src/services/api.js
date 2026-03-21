@@ -73,6 +73,22 @@ async function requestJson(path, options = {}) {
     const errorMessage = errorPayload?.error || `Erro ao buscar ${path}`;
     const error = new Error(errorMessage);
     error.status = response.status;
+    error.code = errorPayload?.code || null;
+
+    if (
+      typeof window !== "undefined" &&
+      (response.status === 401 || response.status === 403)
+    ) {
+      window.dispatchEvent(
+        new CustomEvent("viisync:auth-failure", {
+          detail: {
+            status: response.status,
+            code: error.code,
+            message: errorMessage,
+          },
+        })
+      );
+    }
 
     throw error;
   }
@@ -95,6 +111,23 @@ async function requestBlob(path, options = {}) {
     const errorMessage = errorPayload?.error || `Erro ao buscar ${path}`;
     const error = new Error(errorMessage);
     error.status = response.status;
+    error.code = errorPayload?.code || null;
+
+    if (
+      typeof window !== "undefined" &&
+      (response.status === 401 || response.status === 403)
+    ) {
+      window.dispatchEvent(
+        new CustomEvent("viisync:auth-failure", {
+          detail: {
+            status: response.status,
+            code: error.code,
+            message: errorMessage,
+          },
+        })
+      );
+    }
+
     throw error;
   }
 

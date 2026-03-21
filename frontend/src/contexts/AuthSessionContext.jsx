@@ -24,6 +24,7 @@ export function AuthSessionProvider({ children }) {
     loading: hasStoredToken(),
     user: null,
     authenticated: false,
+    sessionNotice: null,
   });
 
   const refreshSession = useCallback(async () => {
@@ -32,6 +33,7 @@ export function AuthSessionProvider({ children }) {
         loading: false,
         user: null,
         authenticated: false,
+        sessionNotice: null,
       });
       return null;
     }
@@ -44,10 +46,13 @@ export function AuthSessionProvider({ children }) {
         loading: false,
         user,
         authenticated: Boolean(user),
+        sessionNotice: null,
       });
 
       return user;
     } catch (error) {
+      const shouldShowReplacementNotice = error?.code === "SESSION_REPLACED";
+
       if (error?.status === 401 || error?.status === 403) {
         clearSessionToken();
       }
@@ -56,6 +61,9 @@ export function AuthSessionProvider({ children }) {
         loading: false,
         user: null,
         authenticated: false,
+        sessionNotice: shouldShowReplacementNotice
+          ? error?.message || "Voce iniciou sessao em outro navegador."
+          : null,
       });
 
       return null;
@@ -82,7 +90,15 @@ export function AuthSessionProvider({ children }) {
       loading: false,
       user: null,
       authenticated: false,
+      sessionNotice: null,
     });
+  }, []);
+
+  const clearSessionNotice = useCallback(() => {
+    setState((currentValue) => ({
+      ...currentValue,
+      sessionNotice: null,
+    }));
   }, []);
 
   const clearInactivityTimeout = useCallback(() => {
@@ -109,6 +125,38 @@ export function AuthSessionProvider({ children }) {
       window.clearTimeout(timeoutId);
     };
   }, [refreshSession]);
+
+  useEffect(() => {
+    function handleAuthFailure(event) {
+      const detail = event?.detail || {};
+      const isAuthFailure =
+        Number(detail.status) === 401 || Number(detail.status) === 403;
+
+      if (!isAuthFailure) {
+        return;
+      }
+
+      clearSessionToken();
+      clearInactivityTimeout();
+
+      setState((currentValue) => ({
+        ...currentValue,
+        loading: false,
+        user: null,
+        authenticated: false,
+        sessionNotice:
+          detail.code === "SESSION_REPLACED"
+            ? detail.message || "Voce iniciou sessao em outro navegador."
+            : null,
+      }));
+    }
+
+    window.addEventListener("viisync:auth-failure", handleAuthFailure);
+
+    return () => {
+      window.removeEventListener("viisync:auth-failure", handleAuthFailure);
+    };
+  }, [clearInactivityTimeout]);
 
   useEffect(() => {
     if (!state.authenticated) {
@@ -158,8 +206,10 @@ export function AuthSessionProvider({ children }) {
       refreshSession,
       applySessionToken,
       clearSession,
+      sessionNotice: state.sessionNotice,
+      clearSessionNotice,
     }),
-    [applySessionToken, clearSession, refreshSession, state]
+    [applySessionToken, clearSession, clearSessionNotice, refreshSession, state]
   );
 
   return (

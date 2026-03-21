@@ -7,6 +7,7 @@ const scrypt = promisify(scryptCallback);
 const PASSWORD_SCRYPT_KEYLEN = 64;
 const SESSION_TTL_MS = 1000 * 60 * 60 * 24;
 const REMEMBER_SESSION_TTL_MS = 1000 * 60 * 60 * 24 * 30;
+const SESSION_REPLACED_ERROR_CODE = "SESSION_REPLACED";
 
 class AuthValidationError extends Error {
   constructor(message) {
@@ -17,11 +18,27 @@ class AuthValidationError extends Error {
 }
 
 class AuthUnauthorizedError extends Error {
-  constructor(message) {
+  constructor(message, options = {}) {
     super(message);
     this.name = "AuthUnauthorizedError";
-    this.status = 401;
+    this.status = options.status || 401;
+    this.code = options.code || "AUTH_UNAUTHORIZED";
   }
+}
+
+function buildUnauthorizedSessionResult(
+  message = "Sessao invalida ou expirada.",
+  code = "SESSION_INVALID",
+  status = 401
+) {
+  return {
+    context: null,
+    error: {
+      message,
+      code,
+      status,
+    },
+  };
 }
 
 function normalizeEmail(email) {
@@ -574,19 +591,33 @@ async function loginUser(payload = {}, request = {}) {
   const userAgent = normalizeText(request.headers?.["user-agent"]) || null;
   const ipAddress = resolveClientIp(request);
 
-  const session = await createSession(prisma, user.id, {
-    rememberMe,
-    userAgent,
-    ipAddress,
-  });
+  const session = await prisma.$transaction(async (tx) => {
+    await tx.userSession.updateMany({
+      where: {
+        userId: user.id,
+        revokedAt: null,
+      },
+      data: {
+        revokedAt: new Date(),
+      },
+    });
 
-  await prisma.user.update({
-    where: {
-      id: user.id,
-    },
-    data: {
-      lastLoginAt: new Date(),
-    },
+    const createdSession = await createSession(tx, user.id, {
+      rememberMe,
+      userAgent,
+      ipAddress,
+    });
+
+    await tx.user.update({
+      where: {
+        id: user.id,
+      },
+      data: {
+        lastLoginAt: new Date(),
+      },
+    });
+
+    return createdSession;
   });
 
   return {
@@ -595,21 +626,16 @@ async function loginUser(payload = {}, request = {}) {
   };
 }
 
-async function resolveSessionContextByToken(token) {
+async function resolveSessionValidationByToken(token) {
   if (!token) {
-    return null;
+    return buildUnauthorizedSessionResult();
   }
 
   const sessionTokenHash = hashSessionToken(token);
   const now = new Date();
-
-  const session = await prisma.userSession.findFirst({
+  const session = await prisma.userSession.findUnique({
     where: {
       sessionTokenHash,
-      revokedAt: null,
-      expiresAt: {
-        gt: now,
-      },
     },
     include: {
       user: {
@@ -628,37 +654,97 @@ async function resolveSessionContextByToken(token) {
   });
 
   if (!session || !session.user) {
-    return null;
+    return buildUnauthorizedSessionResult();
   }
 
   if (session.user.status === "SUSPENDED" || session.user.blockedAt) {
-    return null;
+    return buildUnauthorizedSessionResult(
+      "Sua conta esta suspensa no momento.",
+      "ACCOUNT_SUSPENDED",
+      403
+    );
+  }
+
+  if (session.revokedAt) {
+    const replacementSession = await prisma.userSession.findFirst({
+      where: {
+        userId: session.userId,
+        revokedAt: null,
+        expiresAt: {
+          gt: now,
+        },
+        id: {
+          not: session.id,
+        },
+      },
+      select: {
+        id: true,
+      },
+    });
+
+    if (replacementSession) {
+      return buildUnauthorizedSessionResult(
+        "Voce iniciou sessao em outro navegador.",
+        SESSION_REPLACED_ERROR_CODE,
+        401
+      );
+    }
+
+    return buildUnauthorizedSessionResult(
+      "Sessao encerrada. Faca login novamente.",
+      "SESSION_REVOKED",
+      401
+    );
+  }
+
+  if (session.expiresAt <= now) {
+    return buildUnauthorizedSessionResult(
+      "Sessao expirada. Faca login novamente.",
+      "SESSION_EXPIRED",
+      401
+    );
   }
 
   return {
-    token,
-    sessionId: session.id,
-    expiresAt: session.expiresAt.toISOString(),
-    user: mapUserPayload(session.user),
+    context: {
+      token,
+      sessionId: session.id,
+      expiresAt: session.expiresAt.toISOString(),
+      user: mapUserPayload(session.user),
+    },
+    error: null,
   };
 }
 
-async function resolveSessionContextFromRequest(request = {}) {
+async function resolveSessionValidationFromRequest(request = {}) {
   const token = extractBearerToken(request.headers?.authorization);
+  return resolveSessionValidationByToken(token);
+}
 
-  if (!token) {
-    return null;
-  }
+async function resolveSessionContextByToken(token) {
+  const validation = await resolveSessionValidationByToken(token);
+  return validation.context || null;
+}
 
-  return resolveSessionContextByToken(token);
+async function resolveSessionContextFromRequest(request = {}) {
+  const validation = await resolveSessionValidationFromRequest(request);
+  return validation.context || null;
 }
 
 async function getCurrentSession(request = {}) {
-  const context = await resolveSessionContextFromRequest(request);
+  const validation = await resolveSessionValidationFromRequest(request);
 
-  if (!context) {
-    throw new AuthUnauthorizedError("Sessao invalida ou expirada.");
+  if (!validation.context) {
+    throw new AuthUnauthorizedError(
+      validation.error?.message || "Sessao invalida ou expirada.",
+      {
+        status: validation.error?.status || 401,
+        code: validation.error?.code || "SESSION_INVALID",
+      }
+    );
   }
+
+  const context = validation.context;
 
   return {
     user: context.user,
@@ -705,6 +791,8 @@ module.exports = {
   loginUser,
   logoutSession,
   registerUser,
+  SESSION_REPLACED_ERROR_CODE,
   resolveSessionContextByToken,
   resolveSessionContextFromRequest,
+  resolveSessionValidationFromRequest,
 };

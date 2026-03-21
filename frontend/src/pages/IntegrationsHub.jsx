@@ -18,7 +18,7 @@ function IntegrationsHub({ embedded = false }) {
   const [mercadoLivreStatus, setMercadoLivreStatus] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [actionMessage, setActionMessage] = useState("");
+  const [actionFeedback, setActionFeedback] = useState(null);
   const [actionLoading, setActionLoading] = useState(false);
 
   const loadIntegrationHub = useCallback(async () => {
@@ -46,9 +46,12 @@ function IntegrationsHub({ embedded = false }) {
     loadIntegrationHub();
   }, [loadIntegrationHub]);
 
-  function showActionMessage(message) {
-    setActionMessage(message);
-    window.setTimeout(() => setActionMessage(""), 2600);
+  function showActionMessage(message, tone = "success") {
+    setActionFeedback({
+      message,
+      tone,
+    });
+    window.setTimeout(() => setActionFeedback(null), 2600);
   }
 
   async function handleMercadoLivreReconnect(accountName) {
@@ -63,11 +66,13 @@ function IntegrationsHub({ embedded = false }) {
 
       window.open(authorizationPayload.authorizationUrl, "_blank", "noopener,noreferrer");
       showActionMessage(
-        "Fluxo OAuth do Mercado Livre aberto. Conclua a autorizacao e atualize esta tela."
+        "Fluxo OAuth do Mercado Livre aberto. Conclua a autorizacao e atualize esta tela.",
+        "success"
       );
     } catch (actionError) {
       showActionMessage(
-        actionError.message || "Nao foi possivel iniciar a autorizacao do Mercado Livre."
+        actionError.message || "Nao foi possivel iniciar a autorizacao do Mercado Livre.",
+        "error"
       );
     }
   }
@@ -76,10 +81,13 @@ function IntegrationsHub({ embedded = false }) {
     try {
       setActionLoading(true);
       await task();
-      showActionMessage(successMessage);
+      showActionMessage(successMessage, "success");
       await loadIntegrationHub();
     } catch (actionError) {
-      showActionMessage(actionError.message || "Nao foi possivel concluir a operacao.");
+      showActionMessage(
+        actionError.message || "Nao foi possivel concluir a operacao.",
+        "error"
+      );
     } finally {
       setActionLoading(false);
     }
@@ -137,7 +145,17 @@ function IntegrationsHub({ embedded = false }) {
       )}
 
       {error ? <div className="integrations-inline-alert">{error}</div> : null}
-      {actionMessage ? <div className="integrations-inline-success">{actionMessage}</div> : null}
+      {actionFeedback ? (
+        <div
+          className={
+            actionFeedback.tone === "error"
+              ? "integrations-inline-alert"
+              : "integrations-inline-success"
+          }
+        >
+          {actionFeedback.message}
+        </div>
+      ) : null}
       {mercadoLivreStatus?.usingLive ? (
         <div className="integrations-inline-success">
           Integracao Mercado Livre em modo live.

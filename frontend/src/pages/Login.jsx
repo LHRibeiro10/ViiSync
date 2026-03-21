@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { loginUser } from "../services/api";
 import { useAuthSession } from "../contexts/useAuthSession";
@@ -6,13 +6,25 @@ import { useAuthSession } from "../contexts/useAuthSession";
 function Login() {
   const navigate = useNavigate();
   const location = useLocation();
-  const { applySessionToken } = useAuthSession();
+  const { applySessionToken, sessionNotice, clearSessionNotice } = useAuthSession();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [rememberMe, setRememberMe] = useState(true);
   const [showPassword, setShowPassword] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [feedback, setFeedback] = useState(null);
+
+  useEffect(() => {
+    if (!sessionNotice) {
+      return;
+    }
+
+    setFeedback({
+      tone: "error",
+      message: sessionNotice,
+    });
+    clearSessionNotice();
+  }, [clearSessionNotice, sessionNotice]);
 
   async function handleSubmit(event) {
     event.preventDefault();

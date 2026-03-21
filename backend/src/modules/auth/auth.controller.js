@@ -45,17 +45,26 @@ async function postLogout(req, res) {
 
 function handleAuthError(error, res) {
   if (error instanceof AuthValidationError) {
-    res.status(error.status || 400).json({ error: error.message });
+    res.status(error.status || 400).json({
+      error: error.message,
+      ...(error.code ? { code: error.code } : {}),
+    });
     return;
   }
 
   if (error instanceof AuthUnauthorizedError) {
-    res.status(error.status || 401).json({ error: error.message });
+    res.status(error.status || 401).json({
+      error: error.message,
+      ...(error.code ? { code: error.code } : {}),
+    });
     return;
   }
 
   if (error && Number.isInteger(error.status) && error.status >= 400 && error.status < 500) {
-    res.status(error.status).json({ error: error.message });
+    res.status(error.status).json({
+      error: error.message,
+      ...(error.code ? { code: error.code } : {}),
+    });
     return;
   }
 
