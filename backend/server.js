@@ -219,6 +219,10 @@ app.use("/workspace", requireAuth, workspaceRoutes);
 app.use("/admin-console", requireAuth, requireAdmin, adminConsoleRoutes);
 app.use("/assistant", requireAuth, assistantRoutes);
 app.get(
+  "/integrations/mercadolivre/callback",
+  handleMercadoLivreOAuthCallback
+);
+app.get(
   "/integrations/mercadolivre/oauth/callback",
   handleMercadoLivreOAuthCallback
 );

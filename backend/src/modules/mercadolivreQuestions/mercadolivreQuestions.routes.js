@@ -7,7 +7,6 @@ const {
   fetchMercadoLivreItems,
   fetchMercadoLivreIntegrationStatus,
   fetchMercadoLivreOrders,
-  handleMercadoLivreOAuthCallback,
   postMercadoLivreDisconnect,
   postMercadoLivreTokenRefresh,
   startMercadoLivreAuthorization,
@@ -25,10 +24,8 @@ const router = express.Router();
 
 router.get("/status", fetchMercadoLivreIntegrationStatus);
 router.get("/connect", startMercadoLivreAuthorization);
-router.get("/callback", handleMercadoLivreOAuthCallback);
 router.get("/auth/url", fetchMercadoLivreAuthorizationUrl);
 router.get("/auth/start", startMercadoLivreAuthorization);
-router.get("/oauth/callback", handleMercadoLivreOAuthCallback);
 router.post("/refresh", postMercadoLivreTokenRefresh);
 router.post("/disconnect", postMercadoLivreDisconnect);
 router.post("/sync/all", postSyncMarketplaceData);
