@@ -35,11 +35,21 @@ const PORT = process.env.PORT || 3001;
 const HOST = process.env.HOST || "0.0.0.0";
 
 function buildCorsOptions() {
+  function normalizeOriginValue(value) {
+    return String(value || "")
+      .trim()
+      .replace(/\/+$/, "");
+  }
+
   const nodeEnv = String(process.env.NODE_ENV || "development").toLowerCase();
   const configuredOrigins = String(process.env.CORS_ALLOWED_ORIGINS || "")
     .split(",")
-    .map((origin) => origin.trim())
+    .map((origin) => normalizeOriginValue(origin))
     .filter(Boolean);
+  const defaultProductionOrigins = [
+    "https://viisync.com.br",
+    "https://www.viisync.com.br",
+  ];
   const defaultDevelopmentOrigins = [
     "http://localhost:5173",
     "http://127.0.0.1:5173",
@@ -49,8 +59,8 @@ function buildCorsOptions() {
 
   const allowedOrigins = new Set(
     nodeEnv === "production"
-      ? configuredOrigins
-      : [...defaultDevelopmentOrigins, ...configuredOrigins]
+      ? [...defaultProductionOrigins, ...configuredOrigins]
+      : [...defaultDevelopmentOrigins, ...defaultProductionOrigins, ...configuredOrigins]
   );
 
   return {
@@ -62,7 +72,9 @@ function buildCorsOptions() {
         return;
       }
 
-      if (allowedOrigins.has(origin)) {
+      const normalizedOrigin = normalizeOriginValue(origin);
+
+      if (allowedOrigins.has(normalizedOrigin)) {
         callback(null, true);
         return;
       }

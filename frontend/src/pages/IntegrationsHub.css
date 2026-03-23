@@ -22,20 +22,21 @@
 .integrations-summary-card {
   padding: 20px;
   border-radius: 24px;
-  border: 1px solid rgba(148, 163, 184, 0.16);
-  background: rgba(255, 255, 255, 0.96);
+  border: 1px solid var(--border-strong);
+  background: var(--panel-surface-strong);
+  box-shadow: var(--card-shadow-soft);
 }
 
 .integrations-summary-card span {
   display: block;
   margin-bottom: 10px;
-  color: #64748b;
+  color: var(--text-muted);
   font-size: 13px;
   font-weight: 700;
 }
 
 .integrations-summary-card strong {
-  color: #0f172a;
+  color: var(--text-strong);
   font-size: 28px;
 }
 
@@ -53,26 +54,29 @@
 .integrations-inline-success {
   padding: 14px 16px;
   border-radius: 16px;
+  border: 1px solid transparent;
 }
 
 .integrations-inline-alert {
-  background: rgba(254, 242, 242, 0.92);
-  color: #b91c1c;
+  border-color: var(--danger-border);
+  background: var(--danger-soft);
+  color: var(--danger);
 }
 
 .integrations-inline-success {
-  background: rgba(236, 253, 245, 0.92);
-  color: #047857;
+  border-color: var(--success-border);
+  background: var(--success-soft);
+  color: var(--success);
 }
 
 .integrations-panel-header h2 {
   margin: 0;
-  color: #0f172a;
+  color: var(--text-strong);
 }
 
 .integrations-panel-header p {
   margin: 8px 0 0;
-  color: #64748b;
+  color: var(--text-muted);
   line-height: 1.6;
 }
 
@@ -86,8 +90,9 @@
 .integrations-side-card {
   padding: 20px;
   border-radius: 24px;
-  border: 1px solid rgba(148, 163, 184, 0.16);
-  background: rgba(255, 255, 255, 0.96);
+  border: 1px solid var(--border-strong);
+  background: var(--surface-2);
+  box-shadow: var(--card-shadow-soft);
 }
 
 .integrations-account-top,
@@ -101,14 +106,14 @@
 
 .integrations-account-top strong,
 .integrations-side-card strong {
-  color: #0f172a;
+  color: var(--text-strong);
 }
 
 .integrations-account-top p,
 .integrations-account-card p,
 .integrations-side-card p {
   margin: 8px 0 0;
-  color: #475569;
+  color: var(--text);
   line-height: 1.7;
 }
 
@@ -125,13 +130,15 @@
 }
 
 .integrations-badge.is-success {
-  background: rgba(16, 185, 129, 0.14);
-  color: #047857;
+  border: 1px solid var(--success-border);
+  background: var(--success-soft);
+  color: var(--success);
 }
 
 .integrations-badge.is-warning {
-  background: rgba(245, 158, 11, 0.14);
-  color: #9a6700;
+  border: 1px solid var(--warning-border);
+  background: var(--warning-soft);
+  color: var(--warning);
 }
 
 .integrations-account-grid {
@@ -141,14 +148,14 @@
 
 .integrations-account-grid span,
 .integrations-side-card span {
-  color: #64748b;
+  color: var(--text-muted);
   font-size: 13px;
 }
 
 .integrations-account-grid strong {
   display: block;
   margin-top: 6px;
-  color: #0f172a;
+  color: var(--text-strong);
 }
 
 .integrations-primary-button,
@@ -164,14 +171,17 @@
 
 .integrations-primary-button {
   padding: 0 18px;
-  background: linear-gradient(135deg, #1d4ed8 0%, #2563eb 100%);
-  color: #ffffff;
+  background: linear-gradient(135deg, var(--accent-strong) 0%, var(--accent) 100%);
+  color: var(--accent-contrast);
+  box-shadow: var(--button-primary-shadow);
 }
 
 .integrations-secondary-button {
   padding: 0 18px;
-  background: rgba(15, 23, 42, 0.06);
-  color: #0f172a;
+  border: 1px solid var(--border-strong);
+  background: var(--surface-4);
+  color: var(--text-strong);
+  box-shadow: var(--button-secondary-shadow);
 }
 
 .integrations-text-button {
@@ -179,7 +189,13 @@
   padding: 0;
   min-height: auto;
   background: transparent;
-  color: #1d4ed8;
+  color: var(--accent);
+}
+
+.integrations-primary-button:hover,
+.integrations-secondary-button:hover,
+.integrations-text-button:hover {
+  transform: translateY(-1px);
 }
 
 @media (max-width: 1100px) {
