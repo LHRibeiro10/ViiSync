@@ -214,7 +214,7 @@ app.get("/chart-data", requireAuth, async (req, res) => {
 
 app.use("/auth", authRoutes);
 app.use("/alerts", requireAuth, alertsRoutes);
-app.use("/", requireAuth, feedbackRoutes);
+app.use("/", feedbackRoutes);
 app.use("/workspace", requireAuth, workspaceRoutes);
 app.use("/admin-console", requireAuth, requireAdmin, adminConsoleRoutes);
 app.use("/assistant", requireAuth, assistantRoutes);

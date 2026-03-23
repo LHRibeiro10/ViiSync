@@ -1,5 +1,5 @@
 const express = require("express");
-const { requireAdmin } = require("../auth/auth.middleware");
+const { requireAdmin, requireAuth } = require("../auth/auth.middleware");
 
 const {
   fetchAdminFeedback,
@@ -11,11 +11,16 @@ const {
 
 const router = express.Router();
 
-router.get("/feedback", fetchSellerFeedback);
-router.post("/feedback", postSellerFeedback);
+router.get("/feedback", requireAuth, fetchSellerFeedback);
+router.post("/feedback", requireAuth, postSellerFeedback);
 
-router.get("/admin/feedback", requireAdmin, fetchAdminFeedback);
-router.get("/admin/feedback/:feedbackId", requireAdmin, fetchAdminFeedbackById);
-router.post("/admin/feedback/:feedbackId/status", requireAdmin, postAdminFeedbackStatus);
+router.get("/admin/feedback", requireAuth, requireAdmin, fetchAdminFeedback);
+router.get("/admin/feedback/:feedbackId", requireAuth, requireAdmin, fetchAdminFeedbackById);
+router.post(
+  "/admin/feedback/:feedbackId/status",
+  requireAuth,
+  requireAdmin,
+  postAdminFeedbackStatus
+);
 
 module.exports = router;
