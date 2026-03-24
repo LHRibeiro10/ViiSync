@@ -15,7 +15,7 @@ const TOUR_STEPS = [
     description:
       "Aqui o seller entende faturamento, lucro, vendas e ticket medio antes de entrar nos detalhes operacionais.",
     highlights: [
-      "Troque o periodo entre 7, 30 e 90 dias para comparar desempenho.",
+      "Troque o periodo entre 7, 30, 90 dias, 1 ano ou use o modo personalizado.",
       "Use os cards principais como leitura rapida do negocio.",
       "A assistente fica sempre disponivel para perguntas contextuais.",
     ],

@@ -4,6 +4,7 @@ const {
   getProfitReport,
   getReports,
 } = require("../../services/analyticsDb.service");
+const { getPeriodLabel } = require("../../lib/period");
 
 const currencyFormatter = new Intl.NumberFormat("pt-BR", {
   style: "currency",
@@ -243,18 +244,6 @@ function buildQuickQuestions(metrics, currentView) {
   return baseQuestions;
 }
 
-function labelForPeriod(period) {
-  if (period === "7d") {
-    return "7 dias";
-  }
-
-  if (period === "90d") {
-    return "90 dias";
-  }
-
-  return "30 dias";
-}
-
 function detectIntent(message) {
   const normalizedMessage = normalizeText(message);
 
@@ -335,6 +324,14 @@ function detectRequestedPeriod(message, fallbackPeriod = "30d") {
     normalizedMessage.includes("trimestral")
   ) {
     return "90d";
+  }
+
+  if (
+    normalizedMessage.includes("1 ano") ||
+    normalizedMessage.includes("12 meses") ||
+    normalizedMessage.includes("anual")
+  ) {
+    return "1y";
   }
 
   return fallbackPeriod;
@@ -479,11 +476,11 @@ function buildReplyDecorations(message, context) {
       : "positive",
     highlights: [
       {
-        label: `Receita ${labelForPeriod(context.period)}`,
+        label: `Receita ${getPeriodLabel(context.period)}`,
         value: formatCurrency(context.summary.revenue),
       },
       {
-        label: `Lucro ${labelForPeriod(context.period)}`,
+        label: `Lucro ${getPeriodLabel(context.period)}`,
         value: formatCurrency(context.summary.profit),
       },
       {
@@ -500,7 +497,7 @@ function createWelcomeMessage(context) {
     ? ` Ja identifiquei um ponto de atencao: ${context.alerts[0].title.toLowerCase()}.`
     : "";
 
-  return `Sou a assistente do ViiSync. No recorte atual de ${labelForPeriod(
+  return `Sou a assistente do ViiSync. No recorte atual de ${getPeriodLabel(
     context.period
   )}, seu negocio soma ${formatCurrency(
     context.summary.revenue
@@ -588,12 +585,21 @@ async function buildAssistantContext({
   currentView = "/",
   request = {},
 } = {}) {
-  const [snapshot, weeklyDashboard, monthlyDashboard, quarterDashboard, profitReportRows, reports] =
+  const [
+    snapshot,
+    weeklyDashboard,
+    monthlyDashboard,
+    quarterDashboard,
+    yearlyDashboard,
+    profitReportRows,
+    reports,
+  ] =
     await Promise.all([
       getAnalyticsSnapshot(period, request),
       getDashboard("7d", request),
       getDashboard("30d", request),
       getDashboard("90d", request),
+      getDashboard("1y", request),
       getProfitReport(period, request),
       getReports(period, request),
     ]);
@@ -744,6 +750,12 @@ async function buildAssistantContext({
         profit: quarterSummary.profit,
         sales: quarterSummary.sales,
         averageTicket: quarterSummary.averageTicket,
+      },
+      "1y": {
+        revenue: yearlyDashboard.summary.revenue,
+        profit: yearlyDashboard.summary.profit,
+        sales: yearlyDashboard.summary.sales,
+        averageTicket: yearlyDashboard.summary.averageTicket,
       },
     },
     weeklySummary: {

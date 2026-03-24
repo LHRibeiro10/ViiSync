@@ -1,3 +1,5 @@
+import { useState } from "react";
+
 function PencilIcon() {
   return (
     <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -6,6 +8,25 @@ function PencilIcon() {
         fill="currentColor"
       />
     </svg>
+  );
+}
+
+function ProfitProductPhoto({ src, alt }) {
+  const [failed, setFailed] = useState(false);
+
+  if (!src || failed) {
+    return <span className="profit-product-photo profit-product-photo-fallback" aria-hidden="true" />;
+  }
+
+  return (
+    <img
+      src={src}
+      alt={alt}
+      className="profit-product-photo"
+      loading="lazy"
+      referrerPolicy="no-referrer"
+      onError={() => setFailed(true)}
+    />
   );
 }
 
@@ -51,11 +72,7 @@ function ProfitTable({ rows, formatCurrency, formatPercent, onEditRow }) {
               return (
                 <tr key={row.id}>
                   <td data-label="Foto" className="profit-photo-cell">
-                    <img
-                      src={row.photo}
-                      alt={row.title}
-                      className="profit-product-photo"
-                    />
+                    <ProfitProductPhoto src={row.photo} alt={row.title} />
                   </td>
                   <td data-label="Titulo">
                     <div className="profit-title-cell">

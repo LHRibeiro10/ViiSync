@@ -13,6 +13,10 @@
    - `MERCADOLIVRE_CLIENT_ID=<seu_client_id>`
    - `MERCADOLIVRE_CLIENT_SECRET=<seu_client_secret>`
    - `MERCADOLIVRE_REDIRECT_URI=https://<railway-public-domain>/integrations/mercadolivre/oauth/callback`
+   - `PASSWORD_RESET_BASE_URL=https://<frontend-public-domain>`
+   - `PASSWORD_RESET_EMAIL_PROVIDER=resend` (ou `smtp`)
+   - `PASSWORD_RESET_EMAIL_FROM=<no-reply@seu-dominio>`
+   - `RESEND_API_KEY=<sua-chave>` (quando `PASSWORD_RESET_EMAIL_PROVIDER=resend`)
 4. Publique e valide:
    - `GET https://<railway-public-domain>/` retorna `200`
 5. Execute OAuth do Mercado Livre:
@@ -47,6 +51,18 @@ Configure no painel do Railway:
 - `MERCADOLIVRE_REDIRECT_URI=https://<railway-public-domain>/integrations/mercadolivre/oauth/callback`
 - `MERCADOLIVRE_ACCESS_TOKEN=` (vazio inicialmente)
 - `MERCADOLIVRE_SELLER_ID=` (vazio inicialmente)
+- `PASSWORD_RESET_BASE_URL=https://<frontend-public-domain>`
+- `PASSWORD_RESET_EMAIL_PROVIDER=resend` (ou `smtp`)
+- `PASSWORD_RESET_EMAIL_FROM=<no-reply@seu-dominio>`
+- `RESEND_API_KEY=<sua-chave>` (se usar `resend`)
+
+Se optar por SMTP (`PASSWORD_RESET_EMAIL_PROVIDER=smtp`), configure tambem:
+
+- `SMTP_HOST`
+- `SMTP_PORT` (ex.: `587`)
+- `SMTP_USER`
+- `SMTP_PASS`
+- `SMTP_SECURE` (`true` ou `false`)
 
 Para validar se o ambiente esta completo:
 
@@ -113,3 +129,19 @@ No frontend publicado, configure:
 - `VITE_API_BASE_URL=https://<railway-public-domain>`
 
 Com isso, o botao de reconexao do Mercado Livre no Hub de Integracoes usa o backend publicado para abrir OAuth.
+
+## Recuperacao de senha com Resend
+
+Para envio real de e-mail de redefinicao:
+
+1. Verifique seu dominio no Resend (ou use um remetente validado no painel).
+2. Configure no Railway:
+   - `PASSWORD_RESET_BASE_URL=https://<frontend-public-domain>`
+   - `PASSWORD_RESET_EMAIL_PROVIDER=resend`
+   - `PASSWORD_RESET_EMAIL_FROM=ViiSync <no-reply@seu-dominio>`
+   - `RESEND_API_KEY=<sua-chave-resend>`
+3. Faça redeploy do backend.
+4. Teste em `/forgot-password` com um e-mail real.
+
+Observacao: por seguranca, a API sempre retorna mensagem neutra mesmo quando o envio falha.
+Confira logs do backend para diagnostico de entrega.

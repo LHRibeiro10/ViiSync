@@ -36,7 +36,7 @@ function Register() {
     ) {
       setFeedback({
         tone: "error",
-        message: "Preencha os campos obrigatorios para continuar.",
+        message: "Preencha os campos obrigatórios para continuar.",
       });
       return;
     }
@@ -52,7 +52,7 @@ function Register() {
     if (formData.password !== formData.confirmPassword) {
       setFeedback({
         tone: "error",
-        message: "A confirmacao de senha precisa ser igual a senha informada.",
+        message: "A confirmação da senha deve ser igual à senha informada.",
       });
       return;
     }
@@ -60,7 +60,7 @@ function Register() {
     if (!formData.acceptedTerms) {
       setFeedback({
         tone: "error",
-        message: "Voce precisa aceitar os termos para criar a conta.",
+        message: "Você precisa aceitar os termos para criar a conta.",
       });
       return;
     }
@@ -79,7 +79,7 @@ function Register() {
       const token = response?.session?.token;
 
       if (!token) {
-        throw new Error("Sessao nao recebida no cadastro.");
+        throw new Error("Sessão não recebida no cadastro.");
       }
 
       await applySessionToken(token);
@@ -94,7 +94,7 @@ function Register() {
     } catch (error) {
       setFeedback({
         tone: "error",
-        message: error.message || "Nao foi possivel concluir o cadastro.",
+        message: error.message || "Não foi possível concluir o cadastro.",
       });
     } finally {
       setIsSubmitting(false);
@@ -104,12 +104,9 @@ function Register() {
   return (
     <div className="auth-form-shell">
       <div className="auth-form-copy">
-        <span className="auth-form-kicker">Onboarding</span>
+        <span className="auth-form-kicker">Cadastro da operação</span>
         <h2>Criar conta</h2>
-        <p>
-          Crie sua conta e o ViiSync ja prepara um workspace inicial com dados
-          de operacao para voce comecar.
-        </p>
+        <p>Cadastre sua operação e entre no ViiSync em poucos passos.</p>
       </div>
 
       <form className="auth-form auth-form-grid" onSubmit={handleSubmit}>
@@ -117,24 +114,24 @@ function Register() {
           <span>Nome</span>
           <input
             type="text"
-            placeholder="Seu nome"
+            placeholder="Seu nome completo"
             value={formData.name}
             onChange={(event) => updateField("name", event.target.value)}
           />
         </label>
 
         <label className="auth-field">
-          <span>Empresa ou loja</span>
+          <span>Empresa</span>
           <input
             type="text"
-            placeholder="Nome da operacao"
+            placeholder="Nome da operação"
             value={formData.company}
             onChange={(event) => updateField("company", event.target.value)}
           />
         </label>
 
         <label className="auth-field auth-field-full">
-          <span>Email</span>
+          <span>E-mail</span>
           <input
             type="email"
             placeholder="operacao@empresa.com"
@@ -170,8 +167,7 @@ function Register() {
             onChange={(event) => updateField("acceptedTerms", event.target.checked)}
           />
           <span>
-            Concordo com os termos de uso e com a criacao do espaco inicial da minha
-            operacao dentro do ViiSync.
+            Concordo com os Termos de Uso e com a criação do espaço inicial da minha operação no ViiSync.
           </span>
         </label>
 
@@ -193,7 +189,7 @@ function Register() {
       </form>
 
       <div className="auth-secondary-actions">
-        <span>Ja tem uma conta?</span>
+        <span>Já possui acesso?</span>
         <Link to="/login">Entrar</Link>
       </div>
     </div>

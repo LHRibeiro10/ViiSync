@@ -1,69 +1,85 @@
-import { NavLink, Outlet } from "react-router-dom";
+import { NavLink, Outlet, useLocation } from "react-router-dom";
 import BrandLogo from "./BrandLogo";
 import "./AuthLayout.css";
 
-const authHighlights = [
-  {
-    title: "Operacao unificada",
+const authHeroContentByMode = {
+  login: {
+    pill: "Plataforma ViiSync",
+    tagline: "Acesso corporativo",
+    title: "Gestão profissional para sellers que querem escala.",
     description:
-      "Pedidos, produtos, atendimento e indicadores em um unico ambiente de gestao.",
+      "Centralize operação, financeiro e desempenho em um único painel, com leitura rápida e decisões mais seguras.",
   },
-  {
-    title: "Visao financeira clara",
+  register: {
+    pill: "Novo ambiente",
+    tagline: "Cadastro rápido",
+    title: "Crie sua conta e comece com a base certa.",
     description:
-      "Acompanhe receita, custos e margem com foco em decisao e previsibilidade.",
+      "Ative seu ambiente em minutos, conecte canais e organize sua operação desde o primeiro dia.",
   },
-  {
-    title: "Estrutura profissional",
+  forgot: {
+    pill: "Recuperação de acesso",
+    tagline: "Solicitação segura",
+    title: "Recupere seu acesso com segurança.",
     description:
-      "Fluxos organizados para seller e administracao, com base preparada para evolucao.",
+      "Informe seu e-mail e enviaremos um link de redefinição em uma página separada.",
   },
-];
+  reset: {
+    pill: "Redefinição de senha",
+    tagline: "Segurança da conta",
+    title: "Defina uma nova senha para sua conta.",
+    description:
+      "Use uma senha forte para retomar o acesso com proteção e controle.",
+  },
+};
 
-const authStats = [
-  { label: "Ambiente seguro", value: "Acesso protegido" },
-  { label: "Visao operacional", value: "Gestao centralizada" },
-  { label: "Controle de contas", value: "Governanca ativa" },
-];
+function resolveAuthMode(pathname) {
+  const normalizedPathname = String(pathname || "").toLowerCase();
+
+  if (normalizedPathname.startsWith("/cadastro")) {
+    return "register";
+  }
+
+  if (normalizedPathname.startsWith("/forgot-password")) {
+    return "forgot";
+  }
+
+  if (normalizedPathname.startsWith("/reset-password")) {
+    return "reset";
+  }
+
+  if (normalizedPathname.startsWith("/redefinir-senha")) {
+    return "reset";
+  }
+
+  return "login";
+}
 
 function AuthLayout() {
+  const location = useLocation();
+  const authMode = resolveAuthMode(location.pathname);
+  const heroContent = authHeroContentByMode[authMode] || authHeroContentByMode.login;
+  const shouldSwapSides = authMode === "register";
+
   return (
-    <div className="auth-shell">
+    <div
+      className={`auth-shell ${shouldSwapSides ? "is-register-mode" : ""} auth-mode-${authMode}`}
+    >
       <section className="auth-hero">
         <div className="auth-hero-topline">
-          <span className="auth-hero-pill">Plataforma ViiSync</span>
-          <span className="auth-hero-link">Acesso corporativo</span>
+          <span className="auth-hero-pill">{heroContent.pill}</span>
+          <span className="auth-hero-link">{heroContent.tagline}</span>
         </div>
 
-        <div className="auth-hero-logo-box">
+        <div className="auth-hero-logo">
           <BrandLogo showText={false} large />
         </div>
 
         <div className="auth-hero-copy">
-          <h1>Gestao profissional para sellers em um unico painel.</h1>
-          <p>
-            Acesse sua conta para acompanhar operacao, desempenho e indicadores
-            essenciais com consistencia e seguranca.
-          </p>
+          <h1>{heroContent.title}</h1>
+          <p>{heroContent.description}</p>
         </div>
 
-        <div className="auth-hero-highlights">
-          {authHighlights.map((highlight) => (
-            <article key={highlight.title} className="auth-highlight-card">
-              <strong>{highlight.title}</strong>
-              <p>{highlight.description}</p>
-            </article>
-          ))}
-        </div>
-
-        <div className="auth-hero-stats">
-          {authStats.map((stat) => (
-            <div key={stat.label} className="auth-stat">
-              <strong>{stat.value}</strong>
-              <span>{stat.label}</span>
-            </div>
-          ))}
-        </div>
       </section>
 
       <section className="auth-panel">
@@ -83,7 +99,7 @@ function AuthLayout() {
               `auth-switch-link ${isActive ? "is-active" : ""}`
             }
           >
-            Criar conta
+            Cadastrar
           </NavLink>
         </div>
 

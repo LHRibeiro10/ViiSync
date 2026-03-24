@@ -171,8 +171,9 @@
 
 .integrations-primary-button {
   padding: 0 18px;
-  background: linear-gradient(135deg, var(--accent-strong) 0%, var(--accent) 100%);
-  color: var(--accent-contrast);
+  border: 1px solid var(--button-primary-border);
+  background: var(--button-primary-bg);
+  color: var(--button-primary-color);
   box-shadow: var(--button-primary-shadow);
 }
 
@@ -196,6 +197,11 @@
 .integrations-secondary-button:hover,
 .integrations-text-button:hover {
   transform: translateY(-1px);
+}
+
+.integrations-primary-button:hover {
+  background: var(--button-primary-bg-hover);
+  box-shadow: var(--button-primary-shadow-hover);
 }
 
 @media (max-width: 1100px) {

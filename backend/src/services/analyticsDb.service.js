@@ -1,5 +1,12 @@
 const prisma = require("../lib/prisma");
 const { resolveSessionContextFromRequest } = require("../modules/auth/auth.service");
+const {
+  DEFAULT_PERIOD,
+  getPeriodLabel,
+  resolvePeriod: resolvePeriodValue,
+  resolvePeriodRange,
+  shouldAggregatePeriodByMonth,
+} = require("../lib/period");
 
 const currencyFormatter = new Intl.NumberFormat("pt-BR", {
   style: "currency",
@@ -48,11 +55,7 @@ const MONTH_LABELS = [
 ];
 
 function resolvePeriod(period) {
-  if (period === "7d" || period === "30d" || period === "90d") {
-    return period;
-  }
-
-  return "30d";
+  return resolvePeriodValue(period, DEFAULT_PERIOD);
 }
 
 function round2(value) {
@@ -74,20 +77,11 @@ function createHttpError(status, message) {
 }
 
 function startDateForPeriod(period) {
-  const resolved = resolvePeriod(period);
-  const now = new Date();
-  const start = new Date(now);
+  return resolvePeriodRange(period, { fallbackPeriod: DEFAULT_PERIOD }).startDate;
+}
 
-  if (resolved === "7d") {
-    start.setDate(now.getDate() - 6);
-  } else if (resolved === "30d") {
-    start.setDate(now.getDate() - 29);
-  } else {
-    start.setDate(now.getDate() - 89);
-  }
-
-  start.setHours(0, 0, 0, 0);
-  return start;
+function endDateForPeriod(period) {
+  return resolvePeriodRange(period, { fallbackPeriod: DEFAULT_PERIOD }).endDate;
 }
 
 function toMonthKeyFromDate(value) {
@@ -207,6 +201,32 @@ function normalizeText(value) {
   return String(value || "").trim();
 }
 
+function normalizeThumbnailUrl(value) {
+  const url = normalizeText(value);
+
+  if (!url) {
+    return null;
+  }
+
+  if (url.startsWith("data:image/")) {
+    return url;
+  }
+
+  if (url.startsWith("//")) {
+    return `https:${url}`;
+  }
+
+  if (url.startsWith("http://")) {
+    return `https://${url.slice("http://".length)}`;
+  }
+
+  if (url.startsWith("https://")) {
+    return url;
+  }
+
+  return null;
+}
+
 function normalizeAdditionalCostInput(payload = {}, { partial = false } = {}) {
   const normalized = {};
 
@@ -261,8 +281,11 @@ async function getFinancialAdjustmentsForUser(userId, period = "30d") {
   }
 
   const resolvedPeriod = resolvePeriod(period);
-  const periodStart = startDateForPeriod(resolvedPeriod);
-  const periodEnd = new Date();
+  const periodRange = resolvePeriodRange(resolvedPeriod, {
+    fallbackPeriod: DEFAULT_PERIOD,
+  });
+  const periodStart = periodRange.startDate;
+  const periodEnd = periodRange.endDate;
   const monthKeys = listMonthKeysBetween(periodStart, periodEnd);
 
   const [recurringExpenses, additionalCosts] = await Promise.all([
@@ -333,11 +356,7 @@ function normalizeStatus(status) {
   return status ? String(status) : "Em processamento";
 }
 
-function createProductPhoto(label, startColor, endColor) {
-  const safeLabel = String(label || "")
-    .trim()
-    .slice(0, 2)
-    .toUpperCase();
+function createProductPhoto(startColor, endColor) {
   const svg = `
     <svg xmlns="http://www.w3.org/2000/svg" width="96" height="96" viewBox="0 0 96 96">
       <defs>
@@ -348,9 +367,8 @@ function createProductPhoto(label, startColor, endColor) {
       </defs>
       <rect width="96" height="96" rx="24" fill="url(#g)" />
       <rect x="12" y="12" width="72" height="72" rx="18" fill="rgba(255,255,255,0.18)" />
-      <text x="48" y="56" text-anchor="middle" font-family="Arial, sans-serif" font-size="26" font-weight="700" fill="#ffffff">
-        ${safeLabel}
-      </text>
+      <circle cx="36" cy="38" r="7" fill="rgba(255,255,255,0.62)" />
+      <path d="M24 66l14-14 10 10 8-8 16 12H24z" fill="rgba(255,255,255,0.72)" />
     </svg>
   `;
 
@@ -506,12 +524,10 @@ function buildProfitRowsFromOrders(orders = []) {
           : grossRevenue
             ? round2((taxAmount / grossRevenue) * 100)
             : 0;
+      const thumbnailUrl =
+        normalizeThumbnailUrl(item.product?.thumbnail) ||
+        normalizeThumbnailUrl(item.thumbnail);
       const [startColor, endColor] = photoColorsForId(item.id || productTitle);
-      const label = productTitle
-        .split(" ")
-        .slice(0, 2)
-        .map((word) => word[0] || "")
-        .join("");
 
       rows.push({
         id: item.id,
@@ -540,7 +556,7 @@ function buildProfitRowsFromOrders(orders = []) {
         profitMargin,
         roi,
         status: normalizeStatus(order.status),
-        photo: createProductPhoto(label, startColor, endColor),
+        photo: thumbnailUrl || createProductPhoto(startColor, endColor),
       });
     }
   }
@@ -552,15 +568,15 @@ function buildProfitRowsFromOrders(orders = []) {
 
 function groupRowsByPeriod(rows = [], period = "30d") {
   const resolvedPeriod = resolvePeriod(period);
+  const shouldAggregateByMonth = shouldAggregatePeriodByMonth(resolvedPeriod);
   const bucketMap = new Map();
 
   rows.forEach((row) => {
     const rowDate = new Date(row.dateValue);
-    const isQuarter = resolvedPeriod === "90d";
-    const key = isQuarter
+    const key = shouldAggregateByMonth
       ? `${rowDate.getFullYear()}-${String(rowDate.getMonth() + 1).padStart(2, "0")}`
       : shortDateFormatter.format(rowDate);
-    const label = isQuarter
+    const label = shouldAggregateByMonth
       ? `${MONTH_LABELS[rowDate.getMonth()]}/${rowDate.getFullYear()}`
       : shortDateFormatter.format(rowDate);
     const current = bucketMap.get(key) || {
@@ -583,11 +599,13 @@ function groupRowsByPeriod(rows = [], period = "30d") {
 
 async function fetchOrderDomainRows(userId, period = "30d") {
   const periodStart = startDateForPeriod(period);
+  const periodEnd = endDateForPeriod(period);
   const orders = await prisma.order.findMany({
     where: {
       userId,
       saleDate: {
         gte: periodStart,
+        lte: periodEnd,
       },
     },
     include: {
@@ -624,9 +642,13 @@ async function getDashboard(period = "30d", request = {}) {
       id: row.id,
       name: row.product,
       revenueValue: 0,
+      thumbnail: row.photo || null,
     };
 
     current.revenueValue += row.grossRevenue;
+    if (!current.thumbnail && row.photo) {
+      current.thumbnail = row.photo;
+    }
     map.set(row.product, current);
     return map;
   }, new Map());
@@ -637,6 +659,7 @@ async function getDashboard(period = "30d", request = {}) {
       id: `${index + 1}`,
       name: product.name,
       revenue: formatCurrency(product.revenueValue),
+      thumbnail: product.thumbnail || null,
     }));
   const recentOrders = rows.slice(0, 3).map((row, index) => ({
     id: `${index + 1}`,
@@ -798,6 +821,7 @@ async function getProducts(request = {}) {
     return {
       id: product.id,
       name: product.title,
+      thumbnail: normalizeThumbnailUrl(product.thumbnail),
       sku: product.sku || "N/A",
       price: formatCurrency(avgPrice),
       cost: formatCurrency(avgCost),
@@ -1103,7 +1127,10 @@ module.exports = {
   getProfitTable,
   getReports,
   getSettings,
+  getPeriodLabel,
   removeAdditionalCost,
   resolvePeriod,
+  resolvePeriodRange,
+  shouldAggregatePeriodByMonth,
   updateAdditionalCost,
 };

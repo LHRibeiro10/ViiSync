@@ -9,6 +9,7 @@ import AdminUsers from "./pages/AdminUsers";
 import AutomationCenter from "./pages/AutomationCenter";
 import Dashboard from "./pages/Dashboard";
 import FinanceCenter from "./pages/FinanceCenter";
+import ForgotPassword from "./pages/ForgotPassword";
 import Orders from "./pages/Orders";
 import MercadoLivreQuestions from "./pages/MercadoLivreQuestions";
 import OperationsCalendar from "./pages/OperationsCalendar";
@@ -18,6 +19,7 @@ import Login from "./pages/Login";
 import ProductDetail from "./pages/ProductDetail";
 import Register from "./pages/Register";
 import Reports from "./pages/Reports";
+import ResetPassword from "./pages/ResetPassword";
 import Settings from "./pages/Settings";
 import UserCenter from "./pages/UserCenter";
 import { AdminRoute, ProtectedRoute, PublicOnlyRoute } from "./components/RouteGuards";
@@ -31,6 +33,9 @@ function App() {
           <Route element={<AuthLayout />}>
             <Route path="/login" element={<Login />} />
             <Route path="/cadastro" element={<Register />} />
+            <Route path="/forgot-password" element={<ForgotPassword />} />
+            <Route path="/reset-password" element={<ResetPassword />} />
+            <Route path="/redefinir-senha" element={<ResetPassword />} />
           </Route>
         </Route>
 

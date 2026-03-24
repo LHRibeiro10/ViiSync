@@ -7,6 +7,25 @@ function normalizeValue(value) {
   return String(value ?? "").trim().toLowerCase();
 }
 
+function ProductThumbnail({ src, alt }) {
+  const [failed, setFailed] = useState(false);
+
+  if (!src || failed) {
+    return <span className="products-product-thumb is-fallback" aria-hidden="true" />;
+  }
+
+  return (
+    <img
+      src={src}
+      alt={alt}
+      className="products-product-thumb"
+      loading="lazy"
+      referrerPolicy="no-referrer"
+      onError={() => setFailed(true)}
+    />
+  );
+}
+
 function Products() {
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -114,7 +133,12 @@ function Products() {
               <tbody>
                 {filteredProducts.map((product) => (
                   <tr key={product.id}>
-                    <td data-label="Produto">{product.name}</td>
+                    <td data-label="Produto">
+                      <div className="products-product-cell">
+                        <ProductThumbnail src={product.thumbnail} alt={product.name} />
+                        <span>{product.name}</span>
+                      </div>
+                    </td>
                     <td data-label="SKU">{product.sku}</td>
                     <td data-label="Preco">{product.price}</td>
                     <td data-label="Custo">{product.cost}</td>

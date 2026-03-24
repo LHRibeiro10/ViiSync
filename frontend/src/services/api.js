@@ -157,6 +157,20 @@ export async function loginUser(payload) {
   });
 }
 
+export async function requestPasswordReset(payload) {
+  return requestJson("/auth/forgot-password", {
+    method: "POST",
+    body: payload,
+  });
+}
+
+export async function confirmPasswordReset(payload) {
+  return requestJson("/auth/reset-password", {
+    method: "POST",
+    body: payload,
+  });
+}
+
 export async function getCurrentUser() {
   return requestJson("/auth/me");
 }

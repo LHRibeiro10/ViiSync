@@ -162,11 +162,19 @@
   min-height: 52px;
   padding: 0 18px;
   border-radius: 16px;
-  background: linear-gradient(135deg, #1d4ed8 0%, #2563eb 100%);
-  color: #ffffff;
+  border: 1px solid var(--button-primary-border);
+  background: var(--button-primary-bg);
+  color: var(--button-primary-color);
   font-weight: 800;
   cursor: pointer;
-  box-shadow: 0 18px 30px rgba(37, 99, 235, 0.22);
+  box-shadow: var(--button-primary-shadow);
+  transition: transform 0.18s ease, box-shadow 0.18s ease, background 0.18s ease;
+}
+
+.feedback-submit-button:hover:not(:disabled) {
+  transform: translateY(-1px);
+  background: var(--button-primary-bg-hover);
+  box-shadow: var(--button-primary-shadow-hover);
 }
 
 .feedback-submit-button:disabled {

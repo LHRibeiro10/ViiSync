@@ -151,13 +151,19 @@
   min-height: 42px;
   padding: 0 14px;
   border-radius: 12px;
-  border: 1px solid transparent;
-  background: linear-gradient(135deg, var(--accent-strong) 0%, var(--accent) 100%);
-  color: #ffffff;
+  border: 1px solid var(--button-primary-border);
+  background: var(--button-primary-bg);
+  color: var(--button-primary-color);
   font: inherit;
   font-weight: 800;
   cursor: pointer;
   box-shadow: var(--button-primary-shadow);
+}
+
+.finance-recurring-form button:hover:not(:disabled) {
+  transform: translateY(-1px);
+  background: var(--button-primary-bg-hover);
+  box-shadow: var(--button-primary-shadow-hover);
 }
 
 .finance-recurring-form button:disabled {
@@ -346,9 +352,9 @@
 }
 
 .finance-invoices-primary {
-  border: 1px solid transparent;
-  background: linear-gradient(135deg, var(--accent-strong) 0%, var(--accent) 100%);
-  color: #ffffff;
+  border: 1px solid var(--button-primary-border);
+  background: var(--button-primary-bg);
+  color: var(--button-primary-color);
   box-shadow: var(--button-primary-shadow);
 }
 
@@ -370,6 +376,11 @@
 .finance-invoices-secondary:hover,
 .finance-invoices-danger:hover {
   transform: translateY(-1px);
+}
+
+.finance-invoices-primary:hover {
+  background: var(--button-primary-bg-hover);
+  box-shadow: var(--button-primary-shadow-hover);
 }
 
 .finance-invoices-primary:disabled,

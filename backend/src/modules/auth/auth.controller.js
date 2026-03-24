@@ -4,7 +4,9 @@ const {
   getCurrentSession,
   loginUser,
   logoutSession,
+  requestPasswordReset,
   registerUser,
+  resetPassword,
 } = require("./auth.service");
 
 async function postRegister(req, res) {
@@ -37,6 +39,24 @@ async function fetchMe(req, res) {
 async function postLogout(req, res) {
   try {
     const payload = await logoutSession(req);
+    res.json(payload);
+  } catch (error) {
+    handleAuthError(error, res);
+  }
+}
+
+async function postForgotPassword(req, res) {
+  try {
+    const payload = await requestPasswordReset(req.body, req);
+    res.json(payload);
+  } catch (error) {
+    handleAuthError(error, res);
+  }
+}
+
+async function postResetPassword(req, res) {
+  try {
+    const payload = await resetPassword(req.body);
     res.json(payload);
   } catch (error) {
     handleAuthError(error, res);
@@ -76,7 +96,9 @@ function handleAuthError(error, res) {
 
 module.exports = {
   fetchMe,
+  postForgotPassword,
   postLogin,
   postLogout,
   postRegister,
+  postResetPassword,
 };

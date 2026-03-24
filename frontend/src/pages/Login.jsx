@@ -33,7 +33,7 @@ function Login() {
     if (!email.trim() || !password.trim()) {
       setFeedback({
         tone: "error",
-        message: "Preencha email e senha para continuar.",
+        message: "Preencha e-mail e senha para continuar.",
       });
       return;
     }
@@ -50,7 +50,7 @@ function Login() {
       const token = response?.session?.token;
 
       if (!token) {
-        throw new Error("Sessao nao recebida do backend.");
+        throw new Error("Sessão não recebida do backend.");
       }
 
       const sessionUser = await applySessionToken(token);
@@ -67,7 +67,7 @@ function Login() {
     } catch (error) {
       setFeedback({
         tone: "error",
-        message: error.message || "Nao foi possivel fazer login.",
+        message: error.message || "Não foi possível fazer login.",
       });
     } finally {
       setIsSubmitting(false);
@@ -77,19 +77,17 @@ function Login() {
   return (
     <div className="auth-form-shell">
       <div className="auth-form-copy">
-        <span className="auth-form-kicker">Acesso do seller</span>
+        <span className="auth-form-kicker">Acesso da operação</span>
         <h2>Entrar na conta</h2>
-        <p>
-          Entre com seu e-mail e senha para acessar os dados da sua operacao.
-        </p>
+        <p>Use seu e-mail e senha para entrar no ViiSync.</p>
       </div>
 
       <form className="auth-form" onSubmit={handleSubmit}>
         <label className="auth-field">
-          <span>Email</span>
+          <span>E-mail</span>
           <input
             type="email"
-            placeholder="voce@empresa.com"
+            placeholder="você@empresa.com"
             value={email}
             onChange={(event) => setEmail(event.target.value)}
           />
@@ -121,12 +119,12 @@ function Login() {
               checked={rememberMe}
               onChange={(event) => setRememberMe(event.target.checked)}
             />
-            <span>Manter sessao ativa neste dispositivo</span>
+            <span>Manter sessão ativa neste dispositivo</span>
           </label>
 
-          <button type="button" className="auth-text-button">
+          <Link to="/forgot-password" className="auth-text-button">
             Esqueci minha senha
-          </button>
+          </Link>
         </div>
 
         <button type="submit" className="auth-submit-button" disabled={isSubmitting}>
@@ -139,8 +137,8 @@ function Login() {
       </form>
 
       <div className="auth-secondary-actions">
-        <span>Ainda nao tem conta?</span>
-        <Link to="/cadastro">Criar conta agora</Link>
+        <span>Ainda não tem conta?</span>
+        <Link to="/cadastro">Cadastrar agora</Link>
       </div>
     </div>
   );

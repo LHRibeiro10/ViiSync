@@ -308,8 +308,15 @@
 }
 
 .admin-users-actions button.is-secondary {
-  background: linear-gradient(135deg, var(--accent-strong) 0%, var(--accent) 100%);
+  border-color: var(--button-primary-border);
+  background: var(--button-primary-bg);
+  color: var(--button-primary-color);
   box-shadow: var(--button-primary-shadow);
+}
+
+.admin-users-actions button.is-secondary:hover {
+  background: var(--button-primary-bg-hover);
+  box-shadow: var(--button-primary-shadow-hover);
 }
 
 .admin-users-actions button:disabled {

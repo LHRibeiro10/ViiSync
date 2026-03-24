@@ -63,20 +63,20 @@
 .accounts-primary-button {
   min-width: 160px;
   min-height: 50px;
-  border: 1px solid transparent;
-  background: linear-gradient(135deg, var(--accent-strong) 0%, var(--accent) 100%);
-  color: #ffffff;
+  border: 1px solid var(--button-primary-border);
+  background: var(--button-primary-bg);
+  color: var(--button-primary-color);
   padding: 14px 18px;
   border-radius: 14px;
   font-weight: 800;
   cursor: pointer;
   box-shadow: var(--button-primary-shadow);
-  transition: transform 0.2s ease, filter 0.2s ease;
+  transition: transform 0.2s ease, box-shadow 0.2s ease, background-color 0.2s ease;
 }
 
 .accounts-primary-button:hover {
   transform: translateY(-1px);
-  filter: brightness(1.03);
+  background: var(--button-primary-bg-hover);
   box-shadow: var(--button-primary-shadow-hover);
 }
 
@@ -194,14 +194,15 @@
 
 .account-actions .secondary,
 .accounts-modal-actions .secondary {
-  border: 1px solid transparent;
-  background: linear-gradient(135deg, var(--accent-strong) 0%, var(--accent) 100%);
-  color: #ffffff;
+  border: 1px solid var(--button-primary-border);
+  background: var(--button-primary-bg);
+  color: var(--button-primary-color);
   box-shadow: var(--button-primary-shadow);
 }
 
 .account-actions .secondary:hover,
 .accounts-modal-actions .secondary:hover {
+  background: var(--button-primary-bg-hover);
   box-shadow: var(--button-primary-shadow-hover);
 }
 

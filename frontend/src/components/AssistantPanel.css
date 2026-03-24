@@ -412,9 +412,9 @@
   width: 50px;
   height: 50px;
   border-radius: 16px;
-  border: 1px solid transparent;
-  background: linear-gradient(135deg, var(--accent-strong) 0%, var(--accent) 100%);
-  color: #ffffff;
+  border: 1px solid var(--button-primary-border);
+  background: var(--button-primary-bg);
+  color: var(--button-primary-color);
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -429,6 +429,7 @@
 
 .assistant-send-button:hover {
   transform: translateY(-1px);
+  background: var(--button-primary-bg-hover);
   box-shadow: var(--button-primary-shadow-hover);
 }
 

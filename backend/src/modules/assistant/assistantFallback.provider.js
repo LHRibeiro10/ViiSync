@@ -6,6 +6,7 @@ const {
   formatPercent,
   normalizeText,
 } = require("./assistantContext.service");
+const { getPeriodLabel } = require("../../lib/period");
 
 function createFallbackResponse({ userMessage, context, conversationHistory = [] }) {
   const analysis = analyzeMessage(userMessage, context, conversationHistory);
@@ -1259,15 +1260,7 @@ function hasAny(text, terms) {
 }
 
 function labelForPeriod(period) {
-  if (period === "7d") {
-    return "7 dias";
-  }
-
-  if (period === "90d") {
-    return "90 dias";
-  }
-
-  return "30 dias";
+  return getPeriodLabel(period);
 }
 
 function getRequestedChannel(normalizedMessage, context) {

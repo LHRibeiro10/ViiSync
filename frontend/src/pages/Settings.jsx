@@ -6,6 +6,7 @@ import { useAnalyticsPeriod } from "../contexts/useAnalyticsPeriod";
 import { useAuthSession } from "../contexts/useAuthSession";
 import { useTheme } from "../contexts/useTheme";
 import { startSellerOnboardingGuide } from "../utils/sellerOnboardingGuide";
+import { PRESET_PERIOD_KEYS } from "../utils/period";
 import "./Settings.css";
 
 const NOTIFICATIONS_STORAGE_KEY = "viisync-notifications-enabled";
@@ -96,6 +97,9 @@ function Settings() {
 
   const roleLabel = useMemo(() => formatRole(user?.role), [user?.role]);
   const statusLabel = useMemo(() => formatStatus(user?.status), [user?.status]);
+  const selectedPresetPeriod = PRESET_PERIOD_KEYS.includes(selectedPeriod)
+    ? selectedPeriod
+    : "30d";
   const isAdmin = String(user?.role || "").toUpperCase() === "ADMIN";
 
   function handleRestartTutorial() {
@@ -162,7 +166,7 @@ function Settings() {
           <div className="settings-field">
             <label>Periodo padrao de analise</label>
             <select
-              value={selectedPeriod}
+              value={selectedPresetPeriod}
               onChange={(event) => {
                 setSelectedPeriod(event.target.value);
                 setFeedbackMessage("Periodo padrao atualizado.");
@@ -171,6 +175,7 @@ function Settings() {
               <option value="7d">7 dias</option>
               <option value="30d">30 dias</option>
               <option value="90d">90 dias</option>
+              <option value="1y">1 ano</option>
             </select>
           </div>
 

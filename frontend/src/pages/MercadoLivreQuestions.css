@@ -289,9 +289,9 @@
 
 .ml-questions-primary-button {
   padding: 0 18px;
-  border: none;
-  background: linear-gradient(135deg, var(--accent-strong) 0%, var(--accent) 100%);
-  color: #ffffff;
+  border: 1px solid var(--button-primary-border);
+  background: var(--button-primary-bg);
+  color: var(--button-primary-color);
   font-weight: 800;
   cursor: pointer;
   box-shadow: var(--button-primary-shadow);
@@ -299,6 +299,7 @@
 
 .ml-questions-primary-button:hover:not(:disabled) {
   transform: translateY(-1px);
+  background: var(--button-primary-bg-hover);
   box-shadow: var(--button-primary-shadow-hover);
 }
 

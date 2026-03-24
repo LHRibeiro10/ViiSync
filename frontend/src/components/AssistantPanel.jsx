@@ -13,6 +13,7 @@ import {
   sendAssistantMessage,
 } from "../services/api";
 import { useAnalyticsPeriod } from "../contexts/useAnalyticsPeriod";
+import { getPeriodLabel } from "../utils/period";
 import "./AssistantPanel.css";
 
 const STORAGE_KEY = "viisync-assistant-conversation";
@@ -478,11 +479,7 @@ function AssistantPanel({ currentPathname }) {
                   {currentPathname === "/" ? "Dashboard" : currentPathname.replace("/", "")}
                 </span>
                 <span className="assistant-view-pill">
-                  {selectedPeriod === "7d"
-                    ? "7 dias"
-                    : selectedPeriod === "90d"
-                    ? "90 dias"
-                    : "30 dias"}
+                  {getPeriodLabel(selectedPeriod)}
                 </span>
               </div>
 

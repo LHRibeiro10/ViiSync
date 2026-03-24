@@ -1,5 +1,6 @@
 const { buildAssistantContext, formatCurrency, formatPercent } = require("../assistant/assistantContext.service");
 const { resolvePeriod } = require("../../services/analyticsDb.service");
+const { getPeriodLabel } = require("../../lib/period");
 
 const ACTION_MAP = {
   "profit-drop": {
@@ -33,18 +34,6 @@ const ACTION_MAP = {
     category: "integracoes",
   },
 };
-
-function labelForPeriod(period) {
-  if (period === "7d") {
-    return "7 dias";
-  }
-
-  if (period === "90d") {
-    return "90 dias";
-  }
-
-  return "30 dias";
-}
 
 function getSeverityLabel(severity) {
   return severity === "warning" ? "Atenção" : "Monitoramento";
@@ -164,13 +153,13 @@ async function getAlerts(period = "30d", request = {}) {
     digest: [
       {
         id: "digest-revenue",
-        label: `Receita ${labelForPeriod(resolvedPeriod)}`,
+        label: `Receita ${getPeriodLabel(resolvedPeriod)}`,
         value: formatCurrency(context.summary.revenue),
         tone: "neutral",
       },
       {
         id: "digest-profit",
-        label: `Lucro ${labelForPeriod(resolvedPeriod)}`,
+        label: `Lucro ${getPeriodLabel(resolvedPeriod)}`,
         value: formatCurrency(context.summary.profit),
         tone: context.summary.profit > 0 ? "success" : "warning",
       },

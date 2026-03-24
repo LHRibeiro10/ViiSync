@@ -3,6 +3,8 @@ import { useNavigate } from "react-router-dom";
 import {
   getChartData,
   getDashboard,
+  getMercadoLivreAuthorizationUrl,
+  getMercadoLivreIntegrationStatus,
   getProfitTable,
   syncMercadoLivreAll,
 } from "../services/api";
@@ -13,6 +15,14 @@ import ChartPanel from "../components/ChartPanel";
 import ProfitTable from "../components/ProfitTable";
 import TaxCalculatorModal from "../components/TaxCalculatorModal";
 import { useAnalyticsPeriod } from "../contexts/useAnalyticsPeriod";
+import {
+  buildCustomPeriodToken,
+  getPeriodLabel,
+  getPeriodRange,
+  isCustomPeriod,
+  MAX_CUSTOM_PERIOD_DAYS,
+  parseCustomPeriodToken,
+} from "../utils/period";
 import "./Dashboard.css";
 
 const currencyFormatter = new Intl.NumberFormat("pt-BR", {
@@ -53,6 +63,15 @@ function Dashboard() {
   const [isPeriodRefreshing, setIsPeriodRefreshing] = useState(false);
   const [periodTransitionStage, setPeriodTransitionStage] = useState("");
   const [syncing, setSyncing] = useState(false);
+  const [connectingMercadoLivre, setConnectingMercadoLivre] = useState(false);
+  const [mercadoLivreStatus, setMercadoLivreStatus] = useState(null);
+  const [integrationFeedback, setIntegrationFeedback] = useState(null);
+  const [isCustomRangePanelOpen, setIsCustomRangePanelOpen] = useState(false);
+  const [customRangeForm, setCustomRangeForm] = useState({
+    startDate: "",
+    endDate: "",
+  });
+  const [customRangeError, setCustomRangeError] = useState("");
   const [selectedRow, setSelectedRow] = useState(null);
   const [calculatorForm, setCalculatorForm] = useState({
     productCost: "",
@@ -63,6 +82,15 @@ function Dashboard() {
   const latestPeriodRequestRef = useRef(0);
   const navigate = useNavigate();
   const { selectedPeriod, setSelectedPeriod } = useAnalyticsPeriod();
+  const hasMercadoLivreConnected = Boolean(mercadoLivreStatus?.usingLive);
+
+  function showIntegrationFeedback(message, tone = "success") {
+    setIntegrationFeedback({
+      tone,
+      message,
+    });
+    window.setTimeout(() => setIntegrationFeedback(null), 3000);
+  }
 
   useEffect(() => {
     const requestId = latestPeriodRequestRef.current + 1;
@@ -87,10 +115,11 @@ function Dashboard() {
 
         setError("");
 
-        const [dashboardResult, chartResult, profitResult] = await Promise.all([
+        const [dashboardResult, chartResult, profitResult, statusResult] = await Promise.all([
           getDashboard(selectedPeriod),
           getChartData(selectedPeriod),
           getProfitTable(selectedPeriod),
+          getMercadoLivreIntegrationStatus().catch(() => null),
         ]);
 
         if (isCancelled || latestPeriodRequestRef.current !== requestId) {
@@ -100,6 +129,7 @@ function Dashboard() {
         setData(dashboardResult);
         setChartData(chartResult);
         setProfitRows(profitResult);
+        setMercadoLivreStatus(statusResult);
         hasLoadedOnceRef.current = true;
 
         if (!isInitialLoad) {
@@ -144,31 +174,113 @@ function Dashboard() {
       return;
     }
 
+    setIsCustomRangePanelOpen(false);
+    setCustomRangeError("");
     setSelectedPeriod(nextPeriod);
+  }
+
+  function handleOpenCustomRangePanel() {
+    const selectedCustomRange = parseCustomPeriodToken(selectedPeriod);
+    const fallbackRange = getPeriodRange("30d");
+
+    setCustomRangeForm({
+      startDate: selectedCustomRange?.startDateIso || fallbackRange.startDateIso,
+      endDate: selectedCustomRange?.endDateIso || fallbackRange.endDateIso,
+    });
+    setCustomRangeError("");
+    setIsCustomRangePanelOpen(true);
+  }
+
+  function handleCloseCustomRangePanel() {
+    setIsCustomRangePanelOpen(false);
+    setCustomRangeError("");
+  }
+
+  function handleCustomRangeFieldChange(event) {
+    const { name, value } = event.target;
+
+    setCustomRangeForm((currentForm) => ({
+      ...currentForm,
+      [name]: value,
+    }));
+
+    if (customRangeError) {
+      setCustomRangeError("");
+    }
+  }
+
+  function handleApplyCustomRange(event) {
+    event.preventDefault();
+
+    const nextPeriod = buildCustomPeriodToken(
+      customRangeForm.startDate,
+      customRangeForm.endDate
+    );
+
+    if (!nextPeriod) {
+      setCustomRangeError(
+        `Defina um intervalo valido entre as datas com no maximo ${MAX_CUSTOM_PERIOD_DAYS} dias.`
+      );
+      return;
+    }
+
+    setSelectedPeriod(nextPeriod);
+    setIsCustomRangePanelOpen(false);
   }
 
   async function handleSync() {
     try {
       setSyncing(true);
       setError("");
+      const syncRange = getPeriodRange(selectedPeriod);
 
       await syncMercadoLivreAll({
         period: selectedPeriod,
+        startDate: syncRange.startDateIso,
+        endDate: syncRange.endDateIso,
       });
 
-      const [dashboardResult, chartResult, profitResult] = await Promise.all([
+      const [dashboardResult, chartResult, profitResult, statusResult] = await Promise.all([
         getDashboard(selectedPeriod),
         getChartData(selectedPeriod),
         getProfitTable(selectedPeriod),
+        getMercadoLivreIntegrationStatus().catch(() => null),
       ]);
 
       setData(dashboardResult);
       setChartData(chartResult);
       setProfitRows(profitResult);
+      setMercadoLivreStatus(statusResult);
     } catch (error) {
       setError(error.message || "Nao foi possivel sincronizar os dados do Mercado Livre.");
     } finally {
       setSyncing(false);
+    }
+  }
+
+  async function handleConnectMercadoLivre() {
+    try {
+      setConnectingMercadoLivre(true);
+      const authorizationPayload = await getMercadoLivreAuthorizationUrl({
+        accountName: "Conta Mercado Livre",
+      });
+
+      if (!authorizationPayload?.authorizationUrl) {
+        throw new Error("Nao foi possivel obter a URL de autorizacao do Mercado Livre.");
+      }
+
+      window.open(authorizationPayload.authorizationUrl, "_blank", "noopener,noreferrer");
+      showIntegrationFeedback(
+        "Fluxo OAuth do Mercado Livre aberto. Conclua a autorizacao para liberar sincronizacao.",
+        "success"
+      );
+    } catch (error) {
+      showIntegrationFeedback(
+        error?.message || "Nao foi possivel iniciar a conexao com o Mercado Livre.",
+        "error"
+      );
+    } finally {
+      setConnectingMercadoLivre(false);
     }
   }
 
@@ -255,31 +367,100 @@ function Dashboard() {
         title="Dashboard ViiSync"
         description="Acompanhe vendas, lucro e desempenho das contas conectadas."
       >
-        <div className={`period-switcher ${isPeriodRefreshing ? "is-busy" : ""}`}>
-          <button
-            className={selectedPeriod === "7d" ? "period-button active" : "period-button"}
-            onClick={() => handlePeriodChange("7d")}
-          >
-            7 dias
-          </button>
+        <div className="dashboard-period-control">
+          <div className={`period-switcher ${isPeriodRefreshing ? "is-busy" : ""}`}>
+            <button
+              className={selectedPeriod === "7d" ? "period-button active" : "period-button"}
+              onClick={() => handlePeriodChange("7d")}
+            >
+              7 dias
+            </button>
 
-          <button
-            className={selectedPeriod === "30d" ? "period-button active" : "period-button"}
-            onClick={() => handlePeriodChange("30d")}
-          >
-            30 dias
-          </button>
+            <button
+              className={selectedPeriod === "30d" ? "period-button active" : "period-button"}
+              onClick={() => handlePeriodChange("30d")}
+            >
+              30 dias
+            </button>
 
-          <button
-            className={selectedPeriod === "90d" ? "period-button active" : "period-button"}
-            onClick={() => handlePeriodChange("90d")}
-          >
-            90 dias
-          </button>
+            <button
+              className={selectedPeriod === "90d" ? "period-button active" : "period-button"}
+              onClick={() => handlePeriodChange("90d")}
+            >
+              90 dias
+            </button>
+
+            <button
+              className={selectedPeriod === "1y" ? "period-button active" : "period-button"}
+              onClick={() => handlePeriodChange("1y")}
+            >
+              1 ano
+            </button>
+
+            <button
+              type="button"
+              className={isCustomPeriod(selectedPeriod) ? "period-button active" : "period-button"}
+              onClick={handleOpenCustomRangePanel}
+            >
+              Personalizar
+            </button>
+          </div>
+
+          {isCustomPeriod(selectedPeriod) ? (
+            <span className="dashboard-period-caption">
+              Recorte ativo: {getPeriodLabel(selectedPeriod)}
+            </span>
+          ) : null}
+
+          {isCustomRangePanelOpen ? (
+            <form className="dashboard-custom-range-panel" onSubmit={handleApplyCustomRange}>
+              <label>
+                <span>Data inicial</span>
+                <input
+                  type="date"
+                  name="startDate"
+                  value={customRangeForm.startDate}
+                  onChange={handleCustomRangeFieldChange}
+                  required
+                />
+              </label>
+
+              <label>
+                <span>Data final</span>
+                <input
+                  type="date"
+                  name="endDate"
+                  value={customRangeForm.endDate}
+                  onChange={handleCustomRangeFieldChange}
+                  required
+                />
+              </label>
+
+              <div className="dashboard-custom-range-actions">
+                <button type="button" onClick={handleCloseCustomRangePanel}>
+                  Cancelar
+                </button>
+                <button type="submit">Aplicar</button>
+              </div>
+
+              {customRangeError ? (
+                <p className="dashboard-custom-range-error">{customRangeError}</p>
+              ) : null}
+            </form>
+          ) : null}
         </div>
 
-        <button onClick={handleSync}>
-          {syncing ? "Sincronizando..." : "Sincronizar"}
+        <button
+          onClick={hasMercadoLivreConnected ? handleSync : handleConnectMercadoLivre}
+          disabled={hasMercadoLivreConnected ? syncing : connectingMercadoLivre}
+        >
+          {hasMercadoLivreConnected
+            ? syncing
+              ? "Sincronizando..."
+              : "Sincronizar"
+            : connectingMercadoLivre
+              ? "Abrindo OAuth..."
+              : "Conectar Mercado Livre"}
         </button>
       </PageHeader>
 
@@ -288,6 +469,38 @@ function Dashboard() {
         aria-busy={isPeriodRefreshing}
       >
         {error ? <div className="dashboard-inline-error">{error}</div> : null}
+        {integrationFeedback ? (
+          <div
+            className={
+              integrationFeedback.tone === "error"
+                ? "dashboard-inline-error"
+                : "dashboard-inline-success"
+            }
+          >
+            {integrationFeedback.message}
+          </div>
+        ) : null}
+        {hasMercadoLivreConnected ? null : (
+          <section className="dashboard-ml-connect-box">
+            <div className="dashboard-ml-connect-copy">
+              <span className="dashboard-ml-connect-tag">Integracao pendente</span>
+              <h2>Conecte sua conta do Mercado Livre</h2>
+              <p>
+                Para sincronizar pedidos, produtos e perguntas, conecte agora sua conta com o
+                mesmo fluxo OAuth usado no botao de reconectar.
+              </p>
+            </div>
+
+            <button
+              type="button"
+              className="dashboard-ml-connect-button"
+              onClick={handleConnectMercadoLivre}
+              disabled={connectingMercadoLivre}
+            >
+              {connectingMercadoLivre ? "Abrindo OAuth..." : "Conectar conta Mercado Livre"}
+            </button>
+          </section>
+        )}
 
         <div className="cards">
           <SummaryCard

@@ -1,21 +1,8 @@
-function createProductPhoto(label, startColor, endColor) {
-  const svg = `
-    <svg xmlns="http://www.w3.org/2000/svg" width="96" height="96" viewBox="0 0 96 96">
-      <defs>
-        <linearGradient id="g" x1="0%" y1="0%" x2="100%" y2="100%">
-          <stop offset="0%" stop-color="${startColor}" />
-          <stop offset="100%" stop-color="${endColor}" />
-        </linearGradient>
-      </defs>
-      <rect width="96" height="96" rx="24" fill="url(#g)" />
-      <rect x="12" y="12" width="72" height="72" rx="18" fill="rgba(255,255,255,0.18)" />
-      <text x="48" y="56" text-anchor="middle" font-family="Arial, sans-serif" font-size="28" font-weight="700" fill="#ffffff">
-        ${label}
-      </text>
-    </svg>
-  `;
-
-  return `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`;
+function createProductPhoto(label) {
+  const normalizedLabel = encodeURIComponent(
+    String(label || "produto").trim().toLowerCase()
+  );
+  return `https://picsum.photos/seed/viisync-${normalizedLabel}/320/320`;
 }
 
 function calculateProfit(item) {
@@ -604,6 +591,7 @@ const products = [
   {
     id: "1",
     name: "Cadeira Gamer GX",
+    thumbnail: createProductPhoto("cadeira-gx"),
     sku: "CADEIRA-GX",
     price: "R$ 899,90",
     cost: "R$ 540,00",
@@ -613,6 +601,7 @@ const products = [
   {
     id: "2",
     name: "Teclado Mecanico K500",
+    thumbnail: createProductPhoto("teclado-k500"),
     sku: "TEC-K500",
     price: "R$ 299,90",
     cost: "R$ 170,00",
@@ -622,6 +611,7 @@ const products = [
   {
     id: "3",
     name: "Fone Bluetooth X200",
+    thumbnail: createProductPhoto("fone-x200"),
     sku: "FONE-X200",
     price: "R$ 189,90",
     cost: "R$ 95,00",
@@ -631,6 +621,7 @@ const products = [
   {
     id: "4",
     name: "Mouse Gamer RGB",
+    thumbnail: createProductPhoto("mouse-rgb"),
     sku: "MOUSE-RGB-01",
     price: "R$ 129,90",
     cost: "R$ 62,00",

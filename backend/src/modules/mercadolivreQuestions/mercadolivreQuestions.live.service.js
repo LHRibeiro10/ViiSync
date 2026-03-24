@@ -4,6 +4,9 @@ const DEFAULT_API_BASE_URL = "https://api.mercadolibre.com";
 const DEFAULT_AUTH_BASE_URL = "https://auth.mercadolivre.com.br/authorization";
 const DEFAULT_OAUTH_TOKEN_URL = "https://api.mercadolibre.com/oauth/token";
 const DEFAULT_TIMEOUT_MS = 20000;
+const DEFAULT_SYNC_MAX_RESULTS = 500;
+const MAX_SYNC_RESULTS = 1000;
+const { buildCustomRange, resolvePeriodRange } = require("../../lib/period");
 
 class MercadoLivreLiveServiceError extends Error {
   constructor(message, status = 500, payload = null) {
@@ -181,6 +184,47 @@ function toNumber(value, fallback = 0) {
   }
 
   return parsed;
+}
+
+function resolveSyncRange(options = {}) {
+  const hasDateOverrides = Boolean(options?.startDate || options?.endDate);
+
+  if (hasDateOverrides) {
+    try {
+      return buildCustomRange(options.startDate, options.endDate, { strict: true });
+    } catch (error) {
+      throwClientError(
+        error?.message || "Intervalo de datas invalido para sincronizacao.",
+        400
+      );
+    }
+  }
+
+  try {
+    return resolvePeriodRange(options?.period || "30d", {
+      fallbackPeriod: "30d",
+      strict: true,
+    });
+  } catch (error) {
+    throwClientError(error?.message || "Periodo invalido para sincronizacao.", 400);
+  }
+}
+
+function isOrderInsideRange(order = {}, range = null) {
+  if (!range || !range.startDate || !range.endDate) {
+    return true;
+  }
+
+  const saleTimestamp = new Date(order?.saleDate || order?.createdAt || 0).getTime();
+
+  if (!Number.isFinite(saleTimestamp)) {
+    return false;
+  }
+
+  return (
+    saleTimestamp >= range.startDate.getTime() &&
+    saleTimestamp <= range.endDate.getTime()
+  );
 }
 
 function buildItemSku(item = {}) {
@@ -442,6 +486,7 @@ function mapOrderEntry(order = {}) {
       return {
         marketplaceItemId: normalizeText(entry?.item?.id),
         title: normalizeText(entry?.item?.title) || "Item sem titulo",
+        thumbnail: normalizeText(entry?.item?.thumbnail) || null,
         sku:
           normalizeText(entry?.item?.seller_sku) ||
           normalizeText(entry?.item?.seller_custom_field) ||
@@ -618,43 +663,32 @@ async function pullOrdersFromApi(accountTokenSource = {}, options = {}) {
     throwClientError("Conta Mercado Livre sem sellerId para sincronizar pedidos.", 400);
   }
 
-  const limit = Math.max(1, Math.min(Number(options.limit) || 50, 50));
-
-  const { payload, tokenState } = await requestWithAutoRefresh(
-    `/orders/search?seller=${encodeURIComponent(sellerId)}&sort=date_desc&limit=${limit}`,
-    { ...accountTokenSource },
-    {
-      method: "GET",
-    }
+  const syncRange = resolveSyncRange(options);
+  const pageLimit = Math.max(1, Math.min(Number(options.limit) || 50, 50));
+  const recommendedMaxResults =
+    syncRange.totalDays > 180
+      ? MAX_SYNC_RESULTS
+      : syncRange.totalDays > 90
+      ? 750
+      : DEFAULT_SYNC_MAX_RESULTS;
+  const maxResults = Math.max(
+    pageLimit,
+    Math.min(Number(options.maxResults) || recommendedMaxResults, MAX_SYNC_RESULTS)
   );
 
-  const rawResults = Array.isArray(payload?.results) ? payload.results : [];
   const orders = [];
-  let latestTokenState = tokenState || null;
+  let latestTokenState = null;
+  let offset = 0;
+  let shouldContinue = true;
 
-  for (const entry of rawResults) {
-    const orderId =
-      entry && typeof entry === "object" && entry.id
-        ? normalizeText(entry.id)
-        : normalizeText(entry);
-
-    if (!orderId) {
-      continue;
-    }
-
-    if (
-      entry &&
-      typeof entry === "object" &&
-      entry.id &&
-      Array.isArray(entry.order_items) &&
-      entry.order_items.length
-    ) {
-      orders.push(mapOrderEntry(entry));
-      continue;
-    }
-
-    try {
-      const orderResult = await fetchOrderById(orderId, {
+  while (shouldContinue && offset < maxResults) {
+    const currentLimit = Math.min(pageLimit, maxResults - offset);
+    const searchPath = `/orders/search?seller=${encodeURIComponent(
+      sellerId
+    )}&sort=date_desc&limit=${currentLimit}&offset=${offset}`;
+    const { payload, tokenState } = await requestWithAutoRefresh(
+      searchPath,
+      {
         ...accountTokenSource,
         ...(latestTokenState
           ? {
@@ -662,17 +696,93 @@ async function pullOrdersFromApi(accountTokenSource = {}, options = {}) {
               refreshToken: latestTokenState.refreshToken,
             }
           : {}),
-      });
+      },
+      {
+        method: "GET",
+      }
+    );
 
-      if (orderResult?.tokenState) {
-        latestTokenState = orderResult.tokenState;
+    if (tokenState) {
+      latestTokenState = tokenState;
+    }
+
+    const rawResults = Array.isArray(payload?.results) ? payload.results : [];
+    if (!rawResults.length) {
+      break;
+    }
+
+    let oldestOrderInBatchTimestamp = Number.POSITIVE_INFINITY;
+
+    for (const entry of rawResults) {
+      const orderId =
+        entry && typeof entry === "object" && entry.id
+          ? normalizeText(entry.id)
+          : normalizeText(entry);
+
+      if (!orderId) {
+        continue;
       }
 
-      if (orderResult?.payload) {
-        orders.push(mapOrderEntry(orderResult.payload));
+      let mappedOrder = null;
+
+      if (
+        entry &&
+        typeof entry === "object" &&
+        entry.id &&
+        Array.isArray(entry.order_items) &&
+        entry.order_items.length
+      ) {
+        mappedOrder = mapOrderEntry(entry);
+      } else {
+        try {
+          const orderResult = await fetchOrderById(orderId, {
+            ...accountTokenSource,
+            ...(latestTokenState
+              ? {
+                  accessToken: latestTokenState.accessToken,
+                  refreshToken: latestTokenState.refreshToken,
+                }
+              : {}),
+          });
+
+          if (orderResult?.tokenState) {
+            latestTokenState = orderResult.tokenState;
+          }
+
+          if (orderResult?.payload) {
+            mappedOrder = mapOrderEntry(orderResult.payload);
+          }
+        } catch {
+          // Mantem a sincronizacao resiliente quando um pedido isolado nao puder ser carregado.
+        }
       }
-    } catch {
-      // Mantem a sincronizacao resiliente quando um pedido isolado nao puder ser carregado.
+
+      if (!mappedOrder) {
+        continue;
+      }
+
+      const saleTimestamp = new Date(mappedOrder.saleDate || mappedOrder.createdAt || 0).getTime();
+      if (Number.isFinite(saleTimestamp) && saleTimestamp < oldestOrderInBatchTimestamp) {
+        oldestOrderInBatchTimestamp = saleTimestamp;
+      }
+
+      if (isOrderInsideRange(mappedOrder, syncRange)) {
+        orders.push(mappedOrder);
+      }
+    }
+
+    offset += rawResults.length;
+
+    if (rawResults.length < currentLimit) {
+      shouldContinue = false;
+      continue;
+    }
+
+    if (
+      Number.isFinite(oldestOrderInBatchTimestamp) &&
+      oldestOrderInBatchTimestamp < syncRange.startDate.getTime()
+    ) {
+      shouldContinue = false;
     }
   }
 
@@ -682,6 +792,11 @@ async function pullOrdersFromApi(accountTokenSource = {}, options = {}) {
       source: "mercado-livre-api",
       total: orders.length,
       lastSyncAt: new Date().toISOString(),
+      range: {
+        startDate: syncRange.startDateOnly,
+        endDate: syncRange.endDateOnly,
+        totalDays: syncRange.totalDays,
+      },
       tokenState: latestTokenState || null,
     },
   };

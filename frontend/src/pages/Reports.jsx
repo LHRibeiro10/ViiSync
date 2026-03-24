@@ -10,6 +10,7 @@ import PageHeader from "../components/PageHeader";
 import SummaryCard from "../components/SummaryCard";
 import Panel from "../components/Panel";
 import { useAnalyticsPeriod } from "../contexts/useAnalyticsPeriod";
+import { getPeriodLabel } from "../utils/period";
 import "./Reports.css";
 
 const currencyFormatter = new Intl.NumberFormat("pt-BR", {
@@ -290,15 +291,7 @@ function calculateMonthlyReportSummary(rows) {
 }
 
 function formatPeriodLabel(period) {
-  if (period === "7d") {
-    return "7 dias";
-  }
-
-  if (period === "90d") {
-    return "90 dias";
-  }
-
-  return "30 dias";
+  return getPeriodLabel(period);
 }
 
 function buildChannelPerformance(rows) {
@@ -1581,6 +1574,13 @@ function Reports() {
               onClick={() => setSelectedPeriod("90d")}
             >
               90 dias
+            </button>
+            <button
+              type="button"
+              className={selectedPeriod === "1y" ? "is-active" : ""}
+              onClick={() => setSelectedPeriod("1y")}
+            >
+              1 ano
             </button>
           </div>
 

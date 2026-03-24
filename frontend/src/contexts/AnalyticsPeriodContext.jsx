@@ -1,13 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
 import { AnalyticsPeriodContext } from "./AnalyticsPeriodContext.shared";
+import {
+  DEFAULT_PERIOD,
+  PRESET_PERIOD_KEYS,
+  normalizePeriod,
+} from "../utils/period";
 
 const STORAGE_KEY = "viisync-selected-period";
-const DEFAULT_PERIOD = "30d";
-const VALID_PERIODS = ["7d", "30d", "90d"];
-
-function normalizePeriod(value) {
-  return VALID_PERIODS.includes(value) ? value : DEFAULT_PERIOD;
-}
 
 export function AnalyticsPeriodProvider({ children }) {
   const [selectedPeriod, setSelectedPeriodState] = useState(() => {
@@ -28,7 +27,7 @@ export function AnalyticsPeriodProvider({ children }) {
       setSelectedPeriod(nextPeriod) {
         setSelectedPeriodState(normalizePeriod(nextPeriod));
       },
-      availablePeriods: VALID_PERIODS,
+      availablePeriods: PRESET_PERIOD_KEYS,
     };
   }, [selectedPeriod]);
 

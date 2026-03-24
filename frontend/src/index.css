@@ -57,12 +57,16 @@
   --interactive-shadow-hover:
     0 18px 34px rgba(15, 23, 42, 0.12),
     0 8px 16px rgba(15, 23, 42, 0.06);
-  --button-primary-shadow:
-    0 18px 34px rgba(37, 99, 235, 0.22),
-    0 8px 18px rgba(37, 99, 235, 0.12);
-  --button-primary-shadow-hover:
-    0 22px 42px rgba(37, 99, 235, 0.26),
-    0 10px 22px rgba(37, 99, 235, 0.14);
+  --button-primary-bg:
+    linear-gradient(135deg, rgba(59, 130, 246, 0.26) 0%, rgba(37, 99, 235, 0.18) 100%),
+    rgba(15, 23, 42, 0.92);
+  --button-primary-bg-hover:
+    linear-gradient(135deg, rgba(59, 130, 246, 0.3) 0%, rgba(37, 99, 235, 0.22) 100%),
+    rgba(15, 23, 42, 0.95);
+  --button-primary-border: rgba(96, 165, 250, 0.24);
+  --button-primary-color: #f8fbff;
+  --button-primary-shadow: 0 16px 28px rgba(2, 6, 23, 0.24);
+  --button-primary-shadow-hover: 0 18px 30px rgba(2, 6, 23, 0.28);
   --button-secondary-shadow: 0 10px 24px rgba(15, 23, 42, 0.06);
   --input-bg: #f8fbff;
   --input-border: #d6e0ec;
@@ -160,12 +164,16 @@
     inset 0 -1px 0 rgba(96, 165, 250, 0.04);
   --interactive-shadow: 0 12px 28px rgba(2, 6, 23, 0.34);
   --interactive-shadow-hover: 0 18px 36px rgba(2, 6, 23, 0.42);
-  --button-primary-shadow:
-    0 20px 40px rgba(37, 99, 235, 0.24),
-    0 8px 18px rgba(37, 99, 235, 0.14);
-  --button-primary-shadow-hover:
-    0 24px 48px rgba(37, 99, 235, 0.32),
-    0 10px 22px rgba(37, 99, 235, 0.18);
+  --button-primary-bg:
+    linear-gradient(135deg, rgba(125, 184, 255, 0.3) 0%, rgba(59, 130, 246, 0.22) 100%),
+    rgba(8, 15, 30, 0.94);
+  --button-primary-bg-hover:
+    linear-gradient(135deg, rgba(147, 197, 253, 0.36) 0%, rgba(59, 130, 246, 0.28) 100%),
+    rgba(8, 15, 30, 0.97);
+  --button-primary-border: rgba(147, 197, 253, 0.28);
+  --button-primary-color: #eff6ff;
+  --button-primary-shadow: 0 18px 32px rgba(2, 6, 23, 0.32);
+  --button-primary-shadow-hover: 0 20px 36px rgba(2, 6, 23, 0.38);
   --button-secondary-shadow: 0 12px 28px rgba(2, 6, 23, 0.28);
   --input-bg: rgba(7, 13, 25, 0.84);
   --input-border: rgba(92, 111, 144, 0.46);

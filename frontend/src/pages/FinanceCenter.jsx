@@ -561,6 +561,13 @@ function FinanceCenter() {
             >
               90 dias
             </button>
+            <button
+              type="button"
+              className={selectedPeriod === "1y" ? "is-active" : ""}
+              onClick={() => setSelectedPeriod("1y")}
+            >
+              1 ano
+            </button>
           </div>
         </div>
       </PageHeader>

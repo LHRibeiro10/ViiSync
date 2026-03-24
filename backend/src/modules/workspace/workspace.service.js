@@ -2,6 +2,8 @@ const {
   getFinancialAdjustmentsForUser,
   getProfitReport,
   resolvePeriod,
+  resolvePeriodRange,
+  shouldAggregatePeriodByMonth,
 } = require("../../services/analyticsDb.service");
 const prisma = require("../../lib/prisma");
 const { resolveSessionContextFromRequest } = require("../auth/auth.service");
@@ -37,6 +39,7 @@ const RECEIVABLE_RATIOS = {
   "7d": { marketplace: 0.34, secondary: 0.08 },
   "30d": { marketplace: 0.32, secondary: 0.1 },
   "90d": { marketplace: 0.3, secondary: 0.12 },
+  "1y": { marketplace: 0.28, secondary: 0.14 },
 };
 
 function cloneData(value) {
@@ -203,7 +206,7 @@ function parseReportDate(dateText) {
 }
 
 function formatPeriodLabel(date, period) {
-  if (period === "90d") {
+  if (shouldAggregatePeriodByMonth(period)) {
     return `${MONTH_LABELS[date.getMonth()]}/${date.getFullYear()}`;
   }
 
@@ -231,11 +234,12 @@ function buildFinanceBase(rows) {
 
 function buildFinanceGroups(rows, period) {
   const resolvedPeriod = resolvePeriod(period);
+  const shouldAggregateByMonth = shouldAggregatePeriodByMonth(resolvedPeriod);
 
   const groups = rows.reduce((accumulator, row) => {
     const date = parseReportDate(row.date);
     const key =
-      resolvedPeriod === "90d"
+      shouldAggregateByMonth
         ? `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`
         : row.date;
     const currentGroup = accumulator.get(key) || {
@@ -292,9 +296,10 @@ function buildReceivables(rows, period) {
     }));
 
   if (resolvedPeriod !== "7d") {
+    const useGatewayLabel = shouldAggregatePeriodByMonth(resolvedPeriod);
     receivables.push({
       id: `recv-${resolvedPeriod}-extra`,
-      marketplace: resolvedPeriod === "90d" ? "Gateway bancario" : "Cartao corporativo",
+      marketplace: useGatewayLabel ? "Gateway bancario" : "Cartao corporativo",
       amount: roundAmount(
         rows.reduce((sum, row) => sum + row.grossRevenue, 0) * ratios.secondary
       ),
@@ -389,27 +394,18 @@ function buildNetProfitBridge(base, adjustments) {
 }
 
 function startDateForPeriod(period) {
-  const resolved = resolvePeriod(period);
-  const now = new Date();
-  const start = new Date(now);
+  return resolvePeriodRange(period).startDate;
+}
 
-  if (resolved === "7d") {
-    start.setDate(now.getDate() - 6);
-  } else if (resolved === "30d") {
-    start.setDate(now.getDate() - 29);
-  } else {
-    start.setDate(now.getDate() - 89);
-  }
-
-  start.setHours(0, 0, 0, 0);
-  return start;
+function endDateForPeriod(period) {
+  return resolvePeriodRange(period).endDate;
 }
 
 function formatEvolutionLabel(date, period) {
   const resolvedPeriod = resolvePeriod(period);
   const currentDate = date instanceof Date ? date : new Date(date);
 
-  if (resolvedPeriod === "90d") {
+  if (shouldAggregatePeriodByMonth(resolvedPeriod)) {
     return `${MONTH_LABELS[currentDate.getMonth()]}/${currentDate.getFullYear()}`;
   }
 
@@ -502,9 +498,14 @@ async function getProductDetail(productId, period = "30d", request = {}) {
   }
 
   const periodStart = startDateForPeriod(resolvedPeriod);
+  const periodEnd = endDateForPeriod(resolvedPeriod);
   const rows = (product.orderItems || []).filter((orderItem) => {
     const saleDate = orderItem.order?.saleDate ? new Date(orderItem.order.saleDate) : null;
-    return saleDate && saleDate.getTime() >= periodStart.getTime();
+    return (
+      saleDate &&
+      saleDate.getTime() >= periodStart.getTime() &&
+      saleDate.getTime() <= periodEnd.getTime()
+    );
   });
 
   const summary = rows.reduce(
@@ -535,7 +536,7 @@ async function getProductDetail(productId, period = "30d", request = {}) {
   const groupedEvolution = rows.reduce((accumulator, row) => {
     const saleDate = row.order?.saleDate ? new Date(row.order.saleDate) : new Date();
     const key =
-      resolvedPeriod === "90d"
+      shouldAggregatePeriodByMonth(resolvedPeriod)
         ? `${saleDate.getFullYear()}-${String(saleDate.getMonth() + 1).padStart(2, "0")}`
         : formatEvolutionLabel(saleDate, resolvedPeriod);
     const current = accumulator.get(key) || {

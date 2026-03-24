@@ -10,6 +10,7 @@ const VALID_PERIODS = {
   "7d": 24 * 7,
   "30d": 24 * 30,
   "90d": 24 * 90,
+  "1y": 24 * 365,
   all: Number.POSITIVE_INFINITY,
 };
 const VALID_SORTS = new Set(["recent", "oldest"]);

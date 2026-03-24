@@ -8,6 +8,7 @@ const {
   formatCurrency,
   formatPercent,
 } = require("./assistantContext.service");
+const { getPeriodLabel } = require("../../lib/period");
 const {
   createConversationRepository,
 } = require("./assistantConversation.repository");
@@ -32,18 +33,6 @@ class AssistantValidationError extends Error {
   }
 }
 
-function getPeriodHighlightLabel(period) {
-  if (period === "7d") {
-    return "7 dias";
-  }
-
-  if (period === "90d") {
-    return "90 dias";
-  }
-
-  return "30 dias";
-}
-
 async function startConversation({
   currentView = "/",
   period = "30d",
@@ -56,11 +45,11 @@ async function startConversation({
       tone: "neutral",
       highlights: [
         {
-          label: `Receita ${getPeriodHighlightLabel(context.period)}`,
+          label: `Receita ${getPeriodLabel(context.period)}`,
           value: formatCurrency(context.summary.revenue),
         },
         {
-          label: `Lucro ${getPeriodHighlightLabel(context.period)}`,
+          label: `Lucro ${getPeriodLabel(context.period)}`,
           value: formatCurrency(context.summary.profit),
         },
         {
@@ -115,11 +104,11 @@ async function resetConversation(
     tone: "neutral",
     highlights: [
       {
-        label: `Receita ${getPeriodHighlightLabel(context.period)}`,
+        label: `Receita ${getPeriodLabel(context.period)}`,
         value: formatCurrency(context.summary.revenue),
       },
       {
-        label: `Lucro ${getPeriodHighlightLabel(context.period)}`,
+        label: `Lucro ${getPeriodLabel(context.period)}`,
         value: formatCurrency(context.summary.profit),
       },
       {

@@ -2,12 +2,20 @@ const { createHash, randomBytes, scrypt: scryptCallback, timingSafeEqual } = req
 const { promisify } = require("util");
 
 const prisma = require("../../lib/prisma");
+const { sendPasswordResetEmail } = require("./auth.passwordResetMailer");
 
 const scrypt = promisify(scryptCallback);
 const PASSWORD_SCRYPT_KEYLEN = 64;
 const SESSION_TTL_MS = 1000 * 60 * 60 * 24;
 const REMEMBER_SESSION_TTL_MS = 1000 * 60 * 60 * 24 * 30;
+const PASSWORD_RESET_TTL_MS = 1000 * 60 * 30;
+const PASSWORD_RESET_RATE_WINDOW_MS = 1000 * 60 * 15;
+const PASSWORD_RESET_RATE_IP_MAX = 20;
+const PASSWORD_RESET_RATE_EMAIL_MAX = 5;
 const SESSION_REPLACED_ERROR_CODE = "SESSION_REPLACED";
+const PASSWORD_RESET_SUCCESS_MESSAGE =
+  "Se o e-mail estiver cadastrado, enviaremos um link para redefinir sua senha.";
+const passwordResetRateBuckets = new Map();
 
 class AuthValidationError extends Error {
   constructor(message) {
@@ -118,6 +126,86 @@ function buildSessionWindow(rememberMe) {
   return new Date(now + duration);
 }
 
+function buildPasswordResetWindow() {
+  return new Date(Date.now() + PASSWORD_RESET_TTL_MS);
+}
+
+function resolvePasswordResetBaseUrl() {
+  const explicitBaseUrl = normalizeText(
+    process.env.PASSWORD_RESET_BASE_URL ||
+      process.env.FRONTEND_BASE_URL ||
+      process.env.FRONTEND_APP_URL ||
+      process.env.FRONTEND_URL
+  );
+
+  if (explicitBaseUrl) {
+    return explicitBaseUrl.replace(/\/+$/, "");
+  }
+
+  const allowedOrigins = String(process.env.CORS_ALLOWED_ORIGINS || "")
+    .split(",")
+    .map((origin) => normalizeText(origin).replace(/\/+$/, ""))
+    .filter(Boolean);
+
+  if (allowedOrigins.length > 0) {
+    return allowedOrigins[0];
+  }
+
+  return "http://localhost:5173";
+}
+
+function createRateLimitError() {
+  const error = new Error(
+    "Nao foi possivel processar a solicitacao no momento. Tente novamente em alguns minutos."
+  );
+  error.status = 429;
+  return error;
+}
+
+function consumeRateLimitBucket(bucketKey, limit, windowMs) {
+  const key = normalizeText(bucketKey) || "unknown";
+  const now = Date.now();
+  const bucket = passwordResetRateBuckets.get(key) || [];
+  const validWindow = bucket.filter((timestamp) => now - timestamp < windowMs);
+
+  if (validWindow.length >= limit) {
+    passwordResetRateBuckets.set(key, validWindow);
+    return false;
+  }
+
+  validWindow.push(now);
+  passwordResetRateBuckets.set(key, validWindow);
+
+  if (passwordResetRateBuckets.size > 5000) {
+    for (const [storedKey, timestamps] of passwordResetRateBuckets.entries()) {
+      const hasRecentEvent = timestamps.some((timestamp) => now - timestamp < windowMs);
+      if (!hasRecentEvent) {
+        passwordResetRateBuckets.delete(storedKey);
+      }
+    }
+  }
+
+  return true;
+}
+
+function assertPasswordResetRateLimit(email, request = {}) {
+  const clientIp = resolveClientIp(request) || "ip:unknown";
+  const isIpAllowed = consumeRateLimitBucket(
+    `password-reset:ip:${clientIp}`,
+    PASSWORD_RESET_RATE_IP_MAX,
+    PASSWORD_RESET_RATE_WINDOW_MS
+  );
+  const isEmailAllowed = consumeRateLimitBucket(
+    `password-reset:email:${normalizeEmail(email)}`,
+    PASSWORD_RESET_RATE_EMAIL_MAX,
+    PASSWORD_RESET_RATE_WINDOW_MS
+  );
+
+  if (!isIpAllowed || !isEmailAllowed) {
+    throw createRateLimitError();
+  }
+}
+
 function resolveClientIp(request) {
   const forwarded = request.headers["x-forwarded-for"];
 
@@ -172,6 +260,7 @@ async function seedStarterDataForUser(tx, userId, accountIds) {
       key: "cadeira-gx",
       title: "Cadeira Gamer GX",
       sku: "CADEIRA-GX",
+      thumbnail: "https://picsum.photos/seed/viisync-cadeira-gx/320/320",
       category: "Cadeiras",
       costPrice: 540,
       extraCost: 14,
@@ -182,6 +271,7 @@ async function seedStarterDataForUser(tx, userId, accountIds) {
       key: "teclado-k500",
       title: "Teclado Mecanico K500",
       sku: "TEC-K500",
+      thumbnail: "https://picsum.photos/seed/viisync-teclado-k500/320/320",
       category: "Perifericos",
       costPrice: 170,
       extraCost: 6,
@@ -192,6 +282,7 @@ async function seedStarterDataForUser(tx, userId, accountIds) {
       key: "fone-x200",
       title: "Fone Bluetooth X200",
       sku: "FONE-X200",
+      thumbnail: "https://picsum.photos/seed/viisync-fone-x200/320/320",
       category: "Audio",
       costPrice: 95,
       extraCost: 4,
@@ -202,6 +293,7 @@ async function seedStarterDataForUser(tx, userId, accountIds) {
       key: "mouse-rgb",
       title: "Mouse Gamer RGB",
       sku: "MOUSE-RGB-01",
+      thumbnail: "https://picsum.photos/seed/viisync-mouse-rgb/320/320",
       category: "Perifericos",
       costPrice: 62,
       extraCost: 3,
@@ -219,6 +311,7 @@ async function seedStarterDataForUser(tx, userId, accountIds) {
         marketplaceAccountId: product.marketplaceAccountId,
         title: product.title,
         sku: product.sku,
+        thumbnail: product.thumbnail,
         category: product.category,
         cost: {
           create: {
@@ -435,6 +528,20 @@ async function fetchUserWithMembershipByEmail(email) {
   });
 }
 
+async function fetchUserForPasswordReset(email) {
+  return prisma.user.findUnique({
+    where: {
+      email,
+    },
+    select: {
+      id: true,
+      email: true,
+      status: true,
+      blockedAt: true,
+    },
+  });
+}
+
 async function registerUser(payload = {}, request = {}) {
   const name = normalizeText(payload.name);
   const company = normalizeText(payload.company || "ViiSync Seller");
@@ -495,31 +602,6 @@ async function registerUser(payload = {}, request = {}) {
           userId: user.id,
           role: "OWNER",
         },
-      });
-
-      const marketplaceAccountMain = await tx.marketplaceAccount.create({
-        data: {
-          userId: user.id,
-          marketplace: "Mercado Livre",
-          accountName: "Loja Principal ML",
-          sellerId: `ML-${randomBytes(4).toString("hex").toUpperCase()}`,
-          isActive: true,
-        },
-      });
-
-      const marketplaceAccountShopee = await tx.marketplaceAccount.create({
-        data: {
-          userId: user.id,
-          marketplace: "Shopee",
-          accountName: "Loja Shopee 1",
-          sellerId: `SHP-${randomBytes(4).toString("hex").toUpperCase()}`,
-          isActive: true,
-        },
-      });
-
-      await seedStarterDataForUser(tx, user.id, {
-        mercadoLivre: marketplaceAccountMain.id,
-        shopee: marketplaceAccountShopee.id,
       });
 
       const session = await createSession(tx, user.id, {
@@ -623,6 +705,168 @@ async function loginUser(payload = {}, request = {}) {
   return {
     user: mapUserPayload(user),
     session,
+  };
+}
+
+async function requestPasswordReset(payload = {}, request = {}) {
+  const email = normalizeEmail(payload.email);
+
+  if (!email || !email.includes("@")) {
+    throw new AuthValidationError("Informe um e-mail valido.");
+  }
+
+  const genericResponse = {
+    accepted: true,
+    message: PASSWORD_RESET_SUCCESS_MESSAGE,
+  };
+
+  assertPasswordResetRateLimit(email, request);
+
+  const user = await fetchUserForPasswordReset(email);
+  if (!user || user.status === "SUSPENDED" || user.blockedAt) {
+    return genericResponse;
+  }
+
+  const token = randomBytes(32).toString("hex");
+  const tokenHash = hashSessionToken(token);
+  const expiresAt = buildPasswordResetWindow();
+  const now = new Date();
+
+  await prisma.$transaction(async (tx) => {
+    await tx.passwordResetToken.updateMany({
+      where: {
+        userId: user.id,
+        usedAt: null,
+      },
+      data: {
+        usedAt: now,
+      },
+    });
+
+    await tx.passwordResetToken.create({
+      data: {
+        userId: user.id,
+        tokenHash,
+        expiresAt,
+      },
+    });
+  });
+
+  const resetUrl = `${resolvePasswordResetBaseUrl()}/reset-password?token=${encodeURIComponent(
+    token
+  )}`;
+
+  try {
+    await sendPasswordResetEmail({
+      toEmail: user.email,
+      resetUrl,
+      expiresAtIso: expiresAt.toISOString(),
+    });
+  } catch (error) {
+    console.error("[auth:password-reset:email]", error);
+  }
+
+  return genericResponse;
+}
+
+async function resetPassword(payload = {}) {
+  const token = normalizeText(payload.token);
+  const password = String(payload.password || "");
+
+  if (!token) {
+    throw new AuthValidationError("Token de redefinicao invalido.");
+  }
+
+  if (password.length < 8) {
+    throw new AuthValidationError("A senha deve ter pelo menos 8 caracteres.");
+  }
+
+  const tokenHash = hashSessionToken(token);
+  const now = new Date();
+  const resetToken = await prisma.passwordResetToken.findUnique({
+    where: {
+      tokenHash,
+    },
+    select: {
+      id: true,
+      userId: true,
+      usedAt: true,
+      expiresAt: true,
+      user: {
+        select: {
+          id: true,
+          status: true,
+          blockedAt: true,
+        },
+      },
+    },
+  });
+
+  if (!resetToken || resetToken.usedAt || resetToken.expiresAt <= now) {
+    throw new AuthValidationError("Token de redefinicao invalido ou expirado.");
+  }
+
+  if (!resetToken.user?.id || resetToken.user.status === "SUSPENDED" || resetToken.user.blockedAt) {
+    throw new AuthUnauthorizedError("Sua conta esta suspensa no momento.", {
+      status: 403,
+      code: "ACCOUNT_SUSPENDED",
+    });
+  }
+
+  const passwordHash = await createPasswordHash(password);
+
+  const revokeResult = await prisma.$transaction(async (tx) => {
+    const consumeResult = await tx.passwordResetToken.updateMany({
+      where: {
+        id: resetToken.id,
+        usedAt: null,
+        expiresAt: {
+          gt: now,
+        },
+      },
+      data: {
+        usedAt: now,
+      },
+    });
+
+    if (!consumeResult.count) {
+      throw new AuthValidationError("Token de redefinicao invalido ou expirado.");
+    }
+
+    await tx.passwordResetToken.updateMany({
+      where: {
+        userId: resetToken.userId,
+        usedAt: null,
+      },
+      data: {
+        usedAt: now,
+      },
+    });
+
+    await tx.user.update({
+      where: {
+        id: resetToken.userId,
+      },
+      data: {
+        passwordHash,
+      },
+    });
+
+    return tx.userSession.updateMany({
+      where: {
+        userId: resetToken.userId,
+        revokedAt: null,
+      },
+      data: {
+        revokedAt: now,
+      },
+    });
+  });
+
+  return {
+    reset: true,
+    revokedSessions: revokeResult.count || 0,
+    message: "Senha atualizada com sucesso. Faca login novamente.",
   };
 }
 
@@ -790,7 +1034,9 @@ module.exports = {
   hashSessionToken,
   loginUser,
   logoutSession,
+  requestPasswordReset,
   registerUser,
+  resetPassword,
   SESSION_REPLACED_ERROR_CODE,
   resolveSessionContextByToken,
   resolveSessionContextFromRequest,

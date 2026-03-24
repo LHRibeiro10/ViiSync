@@ -48,16 +48,23 @@
 .alerts-refresh-button,
 .alerts-action-button {
   padding: 0 18px;
-  background: linear-gradient(135deg, #1d4ed8 0%, #2563eb 100%);
-  color: #ffffff;
+  border: 1px solid var(--button-primary-border);
+  background: var(--button-primary-bg);
+  color: var(--button-primary-color);
   font-weight: 700;
-  box-shadow: 0 14px 24px rgba(37, 99, 235, 0.22);
+  box-shadow: var(--button-primary-shadow);
 }
 
 .alerts-action-button:hover,
 .alerts-refresh-button:hover,
 .alerts-text-button:hover {
   transform: translateY(-1px);
+}
+
+.alerts-action-button:hover,
+.alerts-refresh-button:hover {
+  background: var(--button-primary-bg-hover);
+  box-shadow: var(--button-primary-shadow-hover);
 }
 
 .alerts-page-subtitle {

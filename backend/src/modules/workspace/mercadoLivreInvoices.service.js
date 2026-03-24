@@ -1,11 +1,6 @@
 const { getProfitReport } = require("../../services/analyticsDb.service");
 const { resolveSessionContextFromRequest } = require("../auth/auth.service");
-
-const PERIOD_WINDOWS_IN_DAYS = {
-  "7d": 7,
-  "30d": 30,
-  "90d": 90,
-};
+const { resolvePeriod, resolvePeriodRange } = require("../../lib/period");
 
 const invoiceStateByUserId = new Map();
 
@@ -231,24 +226,6 @@ async function ensureInvoiceStore(request = {}) {
   return { userId, state };
 }
 
-function resolvePeriod(period) {
-  if (period === "7d" || period === "30d" || period === "90d") {
-    return period;
-  }
-
-  return "30d";
-}
-
-function getPeriodStart(period) {
-  const resolvedPeriod = resolvePeriod(period);
-  const windowInDays = PERIOD_WINDOWS_IN_DAYS[resolvedPeriod];
-  const endDate = new Date();
-  const startDate = new Date(endDate);
-  startDate.setUTCDate(endDate.getUTCDate() - (windowInDays - 1));
-  startDate.setUTCHours(0, 0, 0, 0);
-  return startDate;
-}
-
 function mapInvoiceItem(invoice) {
   const xmlDownloaded = Boolean(invoice.downloadedXmlAt && invoice.xmlUrl);
   const pdfDownloaded = Boolean(invoice.downloadedPdfAt && invoice.pdfUrl);
@@ -270,15 +247,23 @@ function mapInvoiceItem(invoice) {
 async function buildInvoicePayload(period = "30d", request = {}) {
   const { state } = await ensureInvoiceStore(request);
   const resolvedPeriod = resolvePeriod(period);
-  const periodStart = getPeriodStart(resolvedPeriod);
+  const periodRange = resolvePeriodRange(resolvedPeriod, { fallbackPeriod: "30d" });
+  const periodStart = periodRange.startDate;
+  const periodEnd = periodRange.endDate;
   const items = state.items
     .filter((invoice) => !invoice.dismissedAt)
-    .filter((invoice) => new Date(invoice.issuedAt).getTime() >= periodStart.getTime())
+    .filter((invoice) => {
+      const issuedTimestamp = new Date(invoice.issuedAt).getTime();
+      return (
+        issuedTimestamp >= periodStart.getTime() &&
+        issuedTimestamp <= periodEnd.getTime()
+      );
+    })
     .sort((left, right) => new Date(right.issuedAt) - new Date(left.issuedAt))
     .map(mapInvoiceItem);
 
   return {
-    period: resolvedPeriod,
+    period: periodRange.period,
     provider: "mercado-livre-invoices",
     integrationReady: true,
     meta: {

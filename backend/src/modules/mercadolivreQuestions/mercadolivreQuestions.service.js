@@ -10,6 +10,7 @@ const VALID_PERIODS = {
   "7d": 24 * 7,
   "30d": 24 * 30,
   "90d": 24 * 90,
+  "1y": 24 * 365,
   all: Number.POSITIVE_INFINITY,
 };
 const VALID_SORTS = new Set(["recent", "oldest"]);
@@ -1348,6 +1349,7 @@ async function upsertProductFromMarketplaceItem(userId, marketplaceAccountId, it
 
 async function ensureProductForOrderItem(userId, marketplaceAccountId, item = {}, syncedAt) {
   const marketplaceProductId = normalizeText(item.marketplaceItemId);
+  const thumbnail = normalizeText(item.thumbnail) || null;
 
   if (!marketplaceProductId) {
     return null;
@@ -1372,6 +1374,7 @@ async function ensureProductForOrderItem(userId, marketplaceAccountId, item = {}
       data: {
         title: normalizeText(item.title) || undefined,
         sku: normalizeText(item.sku) || undefined,
+        thumbnail: thumbnail || undefined,
         lastSyncedAt: syncedAt,
       },
     });
@@ -1386,6 +1389,7 @@ async function ensureProductForOrderItem(userId, marketplaceAccountId, item = {}
       marketplaceProductId,
       title: normalizeText(item.title) || `Item ${marketplaceProductId}`,
       sku: normalizeText(item.sku) || null,
+      thumbnail,
       listingPrice: round2(toNumber(item.unitPrice, 0)),
       listingStatus: "active",
       availableQuantity: 0,

@@ -43,9 +43,9 @@
   min-height: 44px;
   padding: 0 18px;
   border-radius: 14px;
-  border: 1px solid transparent;
-  background: linear-gradient(135deg, var(--accent-strong) 0%, var(--accent) 100%);
-  color: #ffffff;
+  border: 1px solid var(--button-primary-border);
+  background: var(--button-primary-bg);
+  color: var(--button-primary-color);
   font: inherit;
   font-weight: 800;
   cursor: pointer;
@@ -59,7 +59,7 @@
 }
 
 .reports-export-button:hover {
-  background: linear-gradient(135deg, var(--accent) 0%, #60a5fa 100%);
+  background: var(--button-primary-bg-hover);
   transform: translateY(-1px);
   box-shadow: var(--button-primary-shadow-hover);
 }
@@ -134,9 +134,9 @@
   height: 50px;
   padding: 0 18px;
   border-radius: 14px;
-  border: 1px solid transparent;
-  background: linear-gradient(135deg, var(--accent-strong) 0%, var(--accent) 100%);
-  color: #ffffff;
+  border: 1px solid var(--button-primary-border);
+  background: var(--button-primary-bg);
+  color: var(--button-primary-color);
   font-weight: 800;
   cursor: pointer;
   box-shadow: var(--button-primary-shadow);
@@ -144,6 +144,7 @@
 
 .expenses-submit:hover {
   transform: translateY(-1px);
+  background: var(--button-primary-bg-hover);
   box-shadow: var(--button-primary-shadow-hover);
 }
 

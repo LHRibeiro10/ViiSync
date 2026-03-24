@@ -7,12 +7,18 @@ function LoadingScreen() {
 
 export function PublicOnlyRoute() {
   const { loading, authenticated, user } = useAuthSession();
+  const location = useLocation();
+  const pathname = String(location.pathname || "").toLowerCase();
+  const isPasswordRecoveryRoute =
+    pathname.startsWith("/forgot-password") ||
+    pathname.startsWith("/reset-password") ||
+    pathname.startsWith("/redefinir-senha");
 
   if (loading) {
     return <LoadingScreen />;
   }
 
-  if (authenticated) {
+  if (authenticated && !isPasswordRecoveryRoute) {
     if (String(user?.role || "").toUpperCase() === "ADMIN") {
       return <Navigate to="/admin" replace />;
     }

@@ -99,9 +99,9 @@
 
 .seller-onboarding-primary,
 .seller-tour-primary {
-  border: 1px solid transparent;
-  background: linear-gradient(135deg, var(--accent-strong) 0%, var(--accent) 100%);
-  color: #ffffff;
+  border: 1px solid var(--button-primary-border);
+  background: var(--button-primary-bg);
+  color: var(--button-primary-color);
   box-shadow: var(--button-primary-shadow);
 }
 
@@ -120,6 +120,12 @@
 .seller-tour-secondary:hover,
 .seller-tour-close:hover {
   transform: translateY(-1px);
+}
+
+.seller-onboarding-primary:hover,
+.seller-tour-primary:hover {
+  background: var(--button-primary-bg-hover);
+  box-shadow: var(--button-primary-shadow-hover);
 }
 
 .seller-tour-card {
