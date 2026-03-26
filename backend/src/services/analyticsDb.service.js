@@ -356,6 +356,122 @@ function normalizeStatus(status) {
   return status ? String(status) : "Em processamento";
 }
 
+function isMercadoLivreMarketplace(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  return normalized.includes("mercado livre") || normalized.includes("mercadolivre");
+}
+
+function hasRealMarketplaceIdentity(account = {}) {
+  return Boolean(normalizeText(account?.sellerId));
+}
+
+function isRealMarketplaceAccount(account = {}) {
+  if (!isMercadoLivreMarketplace(account?.marketplace)) {
+    return false;
+  }
+
+  if (!hasRealMarketplaceIdentity(account)) {
+    return false;
+  }
+
+  const integrationStatus = normalizeText(account?.integrationStatus).toLowerCase();
+  const hasCredentials = Boolean(account?.accessToken || account?.refreshToken);
+  const hasSyncHistory = Boolean(account?.lastSyncedAt);
+
+  return integrationStatus === "connected" || hasCredentials || hasSyncHistory;
+}
+
+function buildRealMarketplaceAccountWhere() {
+  return {
+    sellerId: {
+      not: null,
+    },
+    OR: [
+      {
+        marketplace: {
+          contains: "mercado livre",
+          mode: "insensitive",
+        },
+      },
+      {
+        marketplace: {
+          contains: "mercadolivre",
+          mode: "insensitive",
+        },
+      },
+    ],
+  };
+}
+
+function parseDateTimeInput(value) {
+  const text = String(value || "").trim();
+
+  if (!text) {
+    return null;
+  }
+
+  const parsed = new Date(text);
+  if (Number.isNaN(parsed.getTime())) {
+    return null;
+  }
+
+  return parsed;
+}
+
+function resolveOrdersDateRange(filters = {}) {
+  const startAt = parseDateTimeInput(filters.startAt);
+  const endAt = parseDateTimeInput(filters.endAt);
+
+  if ((startAt && !endAt) || (!startAt && endAt)) {
+    throw createHttpError(
+      400,
+      "Informe data inicial e final para filtrar pedidos."
+    );
+  }
+
+  if (startAt && endAt) {
+    if (startAt.getTime() > endAt.getTime()) {
+      throw createHttpError(
+        400,
+        "A data inicial deve ser menor ou igual a data final."
+      );
+    }
+
+    return {
+      source: "custom-range",
+      period: String(filters.preset || "").trim() || "custom",
+      startDate: startAt,
+      endDate: endAt,
+    };
+  }
+
+  if (filters.period) {
+    const range = resolvePeriodRange(filters.period, {
+      fallbackPeriod: DEFAULT_PERIOD,
+    });
+
+    return {
+      source: "period",
+      period: range.period,
+      startDate: range.startDate,
+      endDate: range.endDate,
+    };
+  }
+
+  return null;
+}
+
+function isLikelyMockProduct(product = {}) {
+  const thumbnail = normalizeText(product?.thumbnail).toLowerCase();
+  const hasSeedThumbnail = thumbnail.includes("picsum.photos/seed/viisync-");
+  const hasMarketplaceProductId = Boolean(
+    normalizeText(product?.marketplaceProductId)
+  );
+  const hasSellerId = hasRealMarketplaceIdentity(product?.marketplaceAccount || {});
+
+  return hasSeedThumbnail && !hasMarketplaceProductId && !hasSellerId;
+}
+
 function createProductPhoto(startColor, endColor) {
   const svg = `
     <svg xmlns="http://www.w3.org/2000/svg" width="96" height="96" viewBox="0 0 96 96">
@@ -510,7 +626,7 @@ function buildProfitRowsFromOrders(orders = []) {
         grossRevenue - marketplaceFee - shippingPaid - productCost - taxAmount
       );
       const netProfit =
-        Number.isFinite(item.profit) && Number(item.profit) !== 0
+        Number.isFinite(item.profit)
           ? round2(item.profit)
           : calculatedProfit;
       const profitMargin = grossRevenue ? round2((netProfit / grossRevenue) * 100) : 0;
@@ -518,9 +634,37 @@ function buildProfitRowsFromOrders(orders = []) {
       const productTitle = item.product?.title || item.title || "Produto sem titulo";
       const accountName = order.marketplaceAccount?.accountName || "Conta";
       const marketplace = order.marketplaceAccount?.marketplace || "Marketplace";
+      const isCommercialMlOrder =
+        isMercadoLivreMarketplace(marketplace) &&
+        Number(order.totalAmount || 0) > 0 &&
+        !normalizeStatus(order.status).toLowerCase().includes("cancel");
+      const normalizedItemTaxPercent = Number(item.taxPercent);
+      const taxPercentMissing =
+        !Number.isFinite(normalizedItemTaxPercent) || normalizedItemTaxPercent <= 0;
+      const feeDataMissing =
+        Boolean(order.marketplaceFeeMissing) ||
+        (isCommercialMlOrder && Number(order.marketplaceFee || 0) === 0);
+      const shippingDataMissing =
+        Boolean(order.shippingFeeMissing) ||
+        (isCommercialMlOrder && Number(order.shippingFee || 0) === 0);
+      const taxDataMissing =
+        Boolean(order.taxAmountMissing) ||
+        (isCommercialMlOrder &&
+          Number(order.taxAmount || 0) === 0 &&
+          taxPercentMissing);
+      const productCostDataMissing =
+        Boolean(item.unitCostMissing) ||
+        (!item.product?.cost &&
+          Number(item.unitCost || 0) === 0 &&
+          Number(item.extraCost || 0) === 0);
+      const hasDataGaps =
+        feeDataMissing ||
+        shippingDataMissing ||
+        taxDataMissing ||
+        productCostDataMissing;
       const taxPercent =
-        Number.isFinite(item.taxPercent) && Number(item.taxPercent) > 0
-          ? Number(item.taxPercent)
+        Number.isFinite(normalizedItemTaxPercent) && normalizedItemTaxPercent > 0
+          ? normalizedItemTaxPercent
           : grossRevenue
             ? round2((taxAmount / grossRevenue) * 100)
             : 0;
@@ -553,6 +697,11 @@ function buildProfitRowsFromOrders(orders = []) {
         grossRevenue,
         netProfit,
         profit: netProfit,
+        feeDataMissing,
+        shippingDataMissing,
+        taxDataMissing,
+        productCostDataMissing,
+        hasDataGaps,
         profitMargin,
         roi,
         status: normalizeStatus(order.status),
@@ -603,6 +752,9 @@ async function fetchOrderDomainRows(userId, period = "30d") {
   const orders = await prisma.order.findMany({
     where: {
       userId,
+      marketplaceAccount: {
+        is: buildRealMarketplaceAccountWhere(),
+      },
       saleDate: {
         gte: periodStart,
         lte: periodEnd,
@@ -699,16 +851,16 @@ async function getProfitTable(period = "30d", request = {}) {
     quantity: row.quantity,
     value: round2(row.value),
     fee: round2(row.fee),
+    feeMissing: Boolean(row.feeDataMissing),
     sellerShipping: round2(row.sellerShipping),
+    sellerShippingMissing: Boolean(row.shippingDataMissing),
     productCost: round2(row.productCost),
+    productCostMissing: Boolean(row.productCostDataMissing),
     taxPercent: round2(row.taxPercent),
-    profit: round2(
-      row.value -
-        row.fee -
-        row.sellerShipping -
-        row.productCost -
-        row.value * (row.taxPercent / 100)
-    ),
+    taxMissing: Boolean(row.taxDataMissing),
+    profit: round2(row.profit),
+    profitEstimated: Boolean(row.hasDataGaps),
+    hasDataGaps: Boolean(row.hasDataGaps),
   }));
 }
 
@@ -735,13 +887,54 @@ async function getProfitReport(period = "30d", request = {}) {
   }));
 }
 
-async function getOrders(request = {}) {
+function mapOrderRowToListItem(order) {
+  return {
+    id: order.marketplaceOrderId || order.id,
+    marketplaceOrderId: order.marketplaceOrderId || null,
+    product: order.items[0]?.title || "Pedido sem item",
+    marketplace: order.marketplaceAccount?.marketplace || "Marketplace",
+    account: order.marketplaceAccount?.accountName || "Conta",
+    value: formatCurrency(Number(order.totalAmount || 0)),
+    valueAmount: round2(Number(order.totalAmount || 0)),
+    netReceived: round2(Number(order.netReceived || 0)),
+    status: normalizeStatus(order.status),
+    saleDate: order.saleDate ? order.saleDate.toISOString() : null,
+    saleDateLabel: order.saleDate ? dateTimeFormatter.format(order.saleDate) : "--",
+  };
+}
+
+function buildOrdersSummary(items = []) {
+  const totalOrders = items.length;
+  const grossRevenue = items.reduce((sum, item) => sum + Number(item.valueAmount || 0), 0);
+  const netReceived = items.reduce((sum, item) => sum + Number(item.netReceived || 0), 0);
+
+  return {
+    totalOrders,
+    grossRevenue: round2(grossRevenue),
+    netReceived: round2(netReceived),
+    averageTicket: totalOrders ? round2(grossRevenue / totalOrders) : 0,
+  };
+}
+
+async function getOrdersPayload(filters = {}, request = {}) {
   const user = await resolveViewerUser(request);
+  const range = resolveOrdersDateRange(filters);
+  const where = {
+    userId: user.id,
+    marketplaceAccount: {
+      is: buildRealMarketplaceAccountWhere(),
+    },
+  };
+
+  if (range?.startDate && range?.endDate) {
+    where.saleDate = {
+      gte: range.startDate,
+      lte: range.endDate,
+    };
+  }
 
   const orders = await prisma.order.findMany({
-    where: {
-      userId: user.id,
-    },
+    where,
     include: {
       marketplaceAccount: true,
       items: {
@@ -756,13 +949,25 @@ async function getOrders(request = {}) {
     },
   });
 
-  return orders.map((order) => ({
-    id: order.marketplaceOrderId || order.id,
-    product: order.items[0]?.title || "Pedido sem item",
-    marketplace: order.marketplaceAccount?.marketplace || "Marketplace",
-    value: formatCurrency(Number(order.totalAmount || 0)),
-    status: normalizeStatus(order.status),
-  }));
+  const items = orders.map(mapOrderRowToListItem);
+  const summary = buildOrdersSummary(items);
+
+  return {
+    items,
+    summary,
+    meta: {
+      total: items.length,
+      period: range?.period || null,
+      source: range?.source || "all",
+      startAt: range?.startDate ? range.startDate.toISOString() : null,
+      endAt: range?.endDate ? range.endDate.toISOString() : null,
+    },
+  };
+}
+
+async function getOrders(request = {}) {
+  const payload = await getOrdersPayload({}, request);
+  return payload.items;
 }
 
 async function getProducts(request = {}) {
@@ -771,6 +976,12 @@ async function getProducts(request = {}) {
   const products = await prisma.product.findMany({
     where: {
       userId: user.id,
+      marketplaceProductId: {
+        not: null,
+      },
+      marketplaceAccount: {
+        is: buildRealMarketplaceAccountWhere(),
+      },
     },
     include: {
       cost: true,
@@ -793,7 +1004,9 @@ async function getProducts(request = {}) {
   const activeCutoff = new Date();
   activeCutoff.setDate(activeCutoff.getDate() - 90);
 
-  return products.map((product) => {
+  return products
+    .filter((product) => !isLikelyMockProduct(product))
+    .map((product) => {
     const orderItems = Array.isArray(product.orderItems) ? product.orderItems : [];
     const avgPrice = orderItems.length
       ? orderItems.reduce((sum, item) => sum + Number(item.unitPrice || 0), 0) / orderItems.length
@@ -837,6 +1050,7 @@ async function getAccounts(request = {}) {
   const accounts = await prisma.marketplaceAccount.findMany({
     where: {
       userId: user.id,
+      ...buildRealMarketplaceAccountWhere(),
     },
     include: {
       orders: {
@@ -856,17 +1070,29 @@ async function getAccounts(request = {}) {
       const time = new Date(order.updatedAt).getTime();
       return time > latest ? time : latest;
     }, 0);
-    const syncReference = latestOrderUpdate
-      ? new Date(latestOrderUpdate)
-      : new Date(account.updatedAt);
+    const syncReference = account.lastSyncedAt
+      ? new Date(account.lastSyncedAt)
+      : latestOrderUpdate
+        ? new Date(latestOrderUpdate)
+        : new Date(account.updatedAt);
+    const hasCredentials = Boolean(account.accessToken || account.refreshToken);
+    const hasSellerId = Boolean(normalizeText(account.sellerId));
+    const status =
+      hasSellerId &&
+      hasCredentials &&
+      normalizeText(account.integrationStatus).toLowerCase() === "connected"
+        ? "Conectada"
+        : "Pendente";
 
     return {
       id: account.id,
       name: account.accountName,
       marketplace: account.marketplace,
-      status: account.isActive ? "Conectada" : "Pendente",
+      status,
       lastSync: dateTimeFormatter.format(syncReference),
       orders: account.orders.length,
+      syncStatus: normalizeText(account.syncStatus) || "idle",
+      syncLastError: account.syncLastError || null,
     };
   });
 }
@@ -1122,6 +1348,7 @@ module.exports = {
   getDashboard,
   listAdditionalCosts,
   getOrders,
+  getOrdersPayload,
   getProducts,
   getProfitReport,
   getProfitTable,

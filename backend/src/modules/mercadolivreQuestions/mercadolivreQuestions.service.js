@@ -19,6 +19,43 @@ const webhookEvents = [];
 const lastSyncByUserId = new Map();
 const oauthStateStore = new Map();
 const OAUTH_STATE_TTL_MS = 1000 * 60 * 10;
+const syncLocksByAccountId = new Map();
+const DEFAULT_SYNC_LOCK_STALE_MS = 1000 * 60 * 60;
+const SYNC_ERROR_MAX_LENGTH = 500;
+const SYNC_STATUS = Object.freeze({
+  IDLE: "idle",
+  SYNCING: "syncing",
+  SUCCESS: "success",
+  ERROR: "error",
+});
+const SYNC_STATUS_LABELS = Object.freeze({
+  [SYNC_STATUS.IDLE]: "Aguardando",
+  [SYNC_STATUS.SYNCING]: "Sincronizando",
+  [SYNC_STATUS.SUCCESS]: "Sucesso",
+  [SYNC_STATUS.ERROR]: "Erro",
+});
+
+const MERCADO_LIVRE_ACCOUNT_SELECT = {
+  id: true,
+  userId: true,
+  sellerId: true,
+  accountName: true,
+  accessToken: true,
+  refreshToken: true,
+  tokenType: true,
+  scope: true,
+  siteId: true,
+  integrationStatus: true,
+  tokenExpiresAt: true,
+  lastSyncedAt: true,
+  autoSyncEnabled: true,
+  syncStatus: true,
+  syncLastStartedAt: true,
+  syncLastFinishedAt: true,
+  syncLastError: true,
+  marketplace: true,
+  isActive: true,
+};
 
 function createHttpError(status, message) {
   const error = new Error(message);
@@ -140,6 +177,177 @@ function toNumber(value, fallbackValue = 0) {
   }
 
   return parsed;
+}
+
+function normalizeSyncStatus(value) {
+  const normalized = normalizeText(value).toLowerCase();
+  return Object.values(SYNC_STATUS).includes(normalized)
+    ? normalized
+    : SYNC_STATUS.IDLE;
+}
+
+function getSyncStatusLabel(value) {
+  const status = normalizeSyncStatus(value);
+  return SYNC_STATUS_LABELS[status] || SYNC_STATUS_LABELS[SYNC_STATUS.IDLE];
+}
+
+function truncateSyncErrorMessage(message) {
+  const normalized = normalizeText(message);
+
+  if (!normalized) {
+    return null;
+  }
+
+  return normalized.slice(0, SYNC_ERROR_MAX_LENGTH);
+}
+
+function sanitizeSyncErrorMessage(error) {
+  if (!error) {
+    return null;
+  }
+
+  return truncateSyncErrorMessage(
+    error?.message || "Falha ao sincronizar com o Mercado Livre."
+  );
+}
+
+function resolveSyncLockStaleMs() {
+  const parsed = Number(process.env.MERCADOLIVRE_SYNC_LOCK_STALE_MS);
+
+  if (!Number.isFinite(parsed) || parsed < 1000 * 60) {
+    return DEFAULT_SYNC_LOCK_STALE_MS;
+  }
+
+  return parsed;
+}
+
+function cleanupExpiredSyncLocks(nowMs = Date.now()) {
+  const staleMs = resolveSyncLockStaleMs();
+
+  for (const [accountId, startedAtMs] of syncLocksByAccountId.entries()) {
+    if (!Number.isFinite(startedAtMs) || nowMs - startedAtMs >= staleMs) {
+      syncLocksByAccountId.delete(accountId);
+    }
+  }
+}
+
+function acquireInMemorySyncLock(accountId) {
+  const lockKey = normalizeText(accountId);
+
+  if (!lockKey) {
+    throw createHttpError(400, "Conta Mercado Livre invalida para sincronizacao.");
+  }
+
+  cleanupExpiredSyncLocks();
+
+  if (syncLocksByAccountId.has(lockKey)) {
+    throw createHttpError(
+      409,
+      "Ja existe uma sincronizacao em andamento para essa conta do Mercado Livre."
+    );
+  }
+
+  syncLocksByAccountId.set(lockKey, Date.now());
+  return lockKey;
+}
+
+function releaseInMemorySyncLock(lockKey) {
+  const normalized = normalizeText(lockKey);
+  if (!normalized) {
+    return;
+  }
+
+  syncLocksByAccountId.delete(normalized);
+}
+
+async function beginAccountSyncLifecycle(accountId) {
+  const now = new Date();
+  const staleReference = new Date(now.getTime() - resolveSyncLockStaleMs());
+
+  const updateResult = await prisma.marketplaceAccount.updateMany({
+    where: {
+      id: accountId,
+      OR: [
+        { syncStatus: { not: SYNC_STATUS.SYNCING } },
+        { syncLastStartedAt: null },
+        { syncLastStartedAt: { lte: staleReference } },
+      ],
+    },
+    data: {
+      syncStatus: SYNC_STATUS.SYNCING,
+      syncLastStartedAt: now,
+      syncLastError: null,
+    },
+  });
+
+  if (!updateResult.count) {
+    throw createHttpError(
+      409,
+      "Ja existe uma sincronizacao em andamento para essa conta do Mercado Livre."
+    );
+  }
+
+  return now;
+}
+
+async function markAccountSyncSuccess(accountId, lastSyncAt = null) {
+  const finishedAt = new Date();
+  const parsedLastSyncAt = ensureDate(lastSyncAt, null);
+
+  await prisma.marketplaceAccount.update({
+    where: {
+      id: accountId,
+    },
+    data: {
+      syncStatus: SYNC_STATUS.SUCCESS,
+      syncLastFinishedAt: finishedAt,
+      syncLastError: null,
+      ...(parsedLastSyncAt ? { lastSyncedAt: parsedLastSyncAt } : {}),
+    },
+  });
+}
+
+async function markAccountSyncError(accountId, error) {
+  await prisma.marketplaceAccount.update({
+    where: {
+      id: accountId,
+    },
+    data: {
+      syncStatus: SYNC_STATUS.ERROR,
+      syncLastFinishedAt: new Date(),
+      syncLastError: sanitizeSyncErrorMessage(error),
+    },
+  });
+}
+
+async function runAccountSyncWithLifecycle(accountId, syncTask, options = {}) {
+  const lockKey = acquireInMemorySyncLock(accountId);
+  let lifecycleStarted = false;
+
+  try {
+    await beginAccountSyncLifecycle(accountId);
+    lifecycleStarted = true;
+
+    const result = await syncTask();
+    const resolvedLastSyncAt = options?.resolveLastSyncAt
+      ? options.resolveLastSyncAt(result)
+      : null;
+
+    await markAccountSyncSuccess(accountId, resolvedLastSyncAt);
+    return result;
+  } catch (error) {
+    if (lifecycleStarted) {
+      try {
+        await markAccountSyncError(accountId, error);
+      } catch (statusError) {
+        console.error("[mercadolivre-questions:sync-status:error]", statusError);
+      }
+    }
+
+    throw error;
+  } finally {
+    releaseInMemorySyncLock(lockKey);
+  }
 }
 
 function cleanupExpiredOAuthStates(now = Date.now()) {
@@ -514,22 +722,7 @@ async function resolveMercadoLivreAccount(userId) {
     orderBy: {
       updatedAt: "desc",
     },
-    select: {
-      id: true,
-      userId: true,
-      sellerId: true,
-      accountName: true,
-      accessToken: true,
-      refreshToken: true,
-      tokenType: true,
-      scope: true,
-      siteId: true,
-      integrationStatus: true,
-      tokenExpiresAt: true,
-      lastSyncedAt: true,
-      marketplace: true,
-      isActive: true,
-    },
+    select: MERCADO_LIVRE_ACCOUNT_SELECT,
   });
 }
 
@@ -544,27 +737,12 @@ async function resolveMercadoLivreAccountById(userId, accountId) {
       userId,
       ...mercadoLivreAccountWhere(),
     },
-    select: {
-      id: true,
-      userId: true,
-      sellerId: true,
-      accountName: true,
-      accessToken: true,
-      refreshToken: true,
-      tokenType: true,
-      scope: true,
-      siteId: true,
-      integrationStatus: true,
-      tokenExpiresAt: true,
-      lastSyncedAt: true,
-      marketplace: true,
-      isActive: true,
-    },
+    select: MERCADO_LIVRE_ACCOUNT_SELECT,
   });
 }
 
 function buildAccountTokenSource(account) {
-  if (!account?.accessToken) {
+  if (!account?.accessToken && !account?.refreshToken) {
     return null;
   }
 
@@ -602,7 +780,9 @@ async function persistAccountTokenState(account, tokenState = null, profile = nu
   }
 
   const nextTokenState = tokenState || {};
-  const tokenExpiresAt = ensureDate(nextTokenState.expiresAt, null);
+  const tokenExpiresAt =
+    ensureDate(nextTokenState.expiresAt, account.tokenExpiresAt || null) ||
+    new Date(Date.now() + 1000 * 60 * 60 * 6);
 
   const updated = await prisma.marketplaceAccount.update({
     where: {
@@ -618,24 +798,10 @@ async function persistAccountTokenState(account, tokenState = null, profile = nu
       accountName: profile?.nickname || account.accountName || "Conta Mercado Livre",
       siteId: profile?.siteId || account.siteId || null,
       integrationStatus: "connected",
+      syncStatus: normalizeSyncStatus(account.syncStatus) || SYNC_STATUS.IDLE,
       isActive: true,
     },
-    select: {
-      id: true,
-      userId: true,
-      sellerId: true,
-      accountName: true,
-      accessToken: true,
-      refreshToken: true,
-      tokenType: true,
-      scope: true,
-      siteId: true,
-      integrationStatus: true,
-      tokenExpiresAt: true,
-      lastSyncedAt: true,
-      marketplace: true,
-      isActive: true,
-    },
+    select: MERCADO_LIVRE_ACCOUNT_SELECT,
   });
 
   return updated;
@@ -661,22 +827,7 @@ async function resolveOrCreateMercadoLivreAccount(userId, preferredAccountName =
       orderBy: {
         updatedAt: "desc",
       },
-      select: {
-        id: true,
-        userId: true,
-        sellerId: true,
-        accountName: true,
-        accessToken: true,
-        refreshToken: true,
-        tokenType: true,
-        scope: true,
-        siteId: true,
-        integrationStatus: true,
-        tokenExpiresAt: true,
-        lastSyncedAt: true,
-        marketplace: true,
-        isActive: true,
-      },
+      select: MERCADO_LIVRE_ACCOUNT_SELECT,
     });
 
     if (existingByName) {
@@ -696,23 +847,10 @@ async function resolveOrCreateMercadoLivreAccount(userId, preferredAccountName =
       accountName: trimmedPreferredName || "Conta Mercado Livre",
       isActive: true,
       integrationStatus: "disconnected",
+      autoSyncEnabled: true,
+      syncStatus: SYNC_STATUS.IDLE,
     },
-    select: {
-      id: true,
-      userId: true,
-      sellerId: true,
-      accountName: true,
-      accessToken: true,
-      refreshToken: true,
-      tokenType: true,
-      scope: true,
-      siteId: true,
-      integrationStatus: true,
-      tokenExpiresAt: true,
-      lastSyncedAt: true,
-      marketplace: true,
-      isActive: true,
-    },
+    select: MERCADO_LIVRE_ACCOUNT_SELECT,
   });
 }
 
@@ -818,13 +956,13 @@ async function canUseLiveProvider(account) {
     return false;
   }
 
-  if (account?.accessToken) {
+  if (account?.accessToken || account?.refreshToken) {
     return true;
   }
 
   if (currentMode === "live") {
     throw new MercadoLivreQuestionValidationError(
-      "Modo live ativo, mas essa conta nao possui token OAuth valido."
+      "Modo live ativo, mas essa conta nao possui credenciais OAuth persistidas."
     );
   }
 
@@ -847,6 +985,13 @@ async function ensureLiveAccountToken(account) {
     ensureDate(account.tokenExpiresAt, null) === null;
 
   if (!shouldRefresh || !account.refreshToken) {
+    if (!account.accessToken && !account.refreshToken) {
+      throw createHttpError(
+        400,
+        "Conta Mercado Livre sem credenciais OAuth para sincronizar."
+      );
+    }
+
     return account;
   }
 
@@ -1016,7 +1161,13 @@ async function listQuestions(filters = {}, request = {}) {
   }
 
   try {
-    const syncResult = await pullAndPersistQuestions(user, account);
+    const syncResult = await runAccountSyncWithLifecycle(
+      account.id,
+      async () => pullAndPersistQuestions(user, account),
+      {
+        resolveLastSyncAt: (result) => result?.lastSyncAt || null,
+      }
+    );
     if (syncResult.synced) {
       return buildQuestionsPayloadForUser(user, account, filters);
     }
@@ -1249,7 +1400,13 @@ async function refreshQuestions(filters = {}, request = {}) {
     };
   }
 
-  const syncResult = await pullAndPersistQuestions(user, account);
+  const syncResult = await runAccountSyncWithLifecycle(
+    account.id,
+    async () => pullAndPersistQuestions(user, account),
+    {
+      resolveLastSyncAt: (result) => result?.lastSyncAt || null,
+    }
+  );
 
   return {
     ...(await buildQuestionsPayloadForUser(user, account, filters)),
@@ -1270,7 +1427,13 @@ async function syncQuestions(filters = {}, request = {}) {
     };
   }
 
-  const syncResult = await pullAndPersistQuestions(user, account);
+  const syncResult = await runAccountSyncWithLifecycle(
+    account.id,
+    async () => pullAndPersistQuestions(user, account),
+    {
+      resolveLastSyncAt: (result) => result?.lastSyncAt || null,
+    }
+  );
 
   return {
     ...(await buildQuestionsPayloadForUser(user, account, filters)),
@@ -1406,6 +1569,7 @@ async function ensureProductForOrderItem(userId, marketplaceAccountId, item = {}
 async function persistRemoteOrders(user, account, remoteOrders = [], lastSyncAt = null) {
   const syncTimestamp = ensureDate(lastSyncAt, new Date()) || new Date();
   let imported = 0;
+  const productCostByProductId = new Map();
 
   for (const remoteOrder of remoteOrders) {
     const marketplaceOrderId = normalizeText(remoteOrder?.id);
@@ -1417,6 +1581,20 @@ async function persistRemoteOrders(user, account, remoteOrders = [], lastSyncAt 
       ensureDate(remoteOrder?.saleDate, null) ||
       ensureDate(remoteOrder?.createdAt, null) ||
       syncTimestamp;
+    const marketplaceFeeDataFound =
+      typeof remoteOrder?.marketplaceFeeDataFound === "boolean"
+        ? remoteOrder.marketplaceFeeDataFound
+        : remoteOrder?.marketplaceFee !== null &&
+          remoteOrder?.marketplaceFee !== undefined;
+    const shippingFeeDataFound =
+      typeof remoteOrder?.shippingFeeDataFound === "boolean"
+        ? remoteOrder.shippingFeeDataFound
+        : remoteOrder?.shippingFee !== null &&
+          remoteOrder?.shippingFee !== undefined;
+    const taxAmountDataFound =
+      typeof remoteOrder?.taxAmountDataFound === "boolean"
+        ? remoteOrder.taxAmountDataFound
+        : remoteOrder?.taxAmount !== null && remoteOrder?.taxAmount !== undefined;
     const totalAmount = round2(toNumber(remoteOrder?.totalAmount, 0));
     const marketplaceFee = round2(toNumber(remoteOrder?.marketplaceFee, 0));
     const shippingFee = round2(toNumber(remoteOrder?.shippingFee, 0));
@@ -1452,9 +1630,12 @@ async function persistRemoteOrders(user, account, remoteOrders = [], lastSyncAt 
             saleDate,
             totalAmount,
             marketplaceFee,
+            marketplaceFeeMissing: !marketplaceFeeDataFound,
             shippingFee,
+            shippingFeeMissing: !shippingFeeDataFound,
             discountAmount,
             taxAmount,
+            taxAmountMissing: !taxAmountDataFound,
             netReceived,
             cancelled: false,
           },
@@ -1473,9 +1654,12 @@ async function persistRemoteOrders(user, account, remoteOrders = [], lastSyncAt 
             saleDate,
             totalAmount,
             marketplaceFee,
+            marketplaceFeeMissing: !marketplaceFeeDataFound,
             shippingFee,
+            shippingFeeMissing: !shippingFeeDataFound,
             discountAmount,
             taxAmount,
+            taxAmountMissing: !taxAmountDataFound,
             netReceived,
             cancelled: false,
           },
@@ -1508,19 +1692,98 @@ async function persistRemoteOrders(user, account, remoteOrders = [], lastSyncAt 
       const feeShare = round2(marketplaceFee * share);
       const shippingShare = round2(shippingFee * share);
       const discountShare = round2(discountAmount * share);
-      const taxShare = round2(taxAmount * share);
+      const orderTaxShare = round2(taxAmount * share);
       const grossRevenue = round2(totalPrice - discountShare);
-      const unitCost = 0;
-      const extraCost = 0;
-      const profit = round2(grossRevenue - feeShare - shippingShare - taxShare);
-      const marginPercent = grossRevenue ? round2((profit / grossRevenue) * 100) : 0;
-      const roiPercent = 0;
       const productId = await ensureProductForOrderItem(
         user.id,
         account.id,
         item,
         syncTimestamp
       );
+      let productCostRow = null;
+
+      if (productId) {
+        if (productCostByProductId.has(productId)) {
+          productCostRow = productCostByProductId.get(productId);
+        } else {
+          productCostRow = await prisma.productCost.findUnique({
+            where: {
+              productId,
+            },
+            select: {
+              costPrice: true,
+              extraCost: true,
+              taxPercent: true,
+            },
+          });
+
+          productCostByProductId.set(productId, productCostRow || null);
+        }
+      }
+
+      const remoteUnitCostValue = Number(
+        item?.unitCost ?? item?.unit_cost ?? item?.cost
+      );
+      const remoteExtraCostRaw = item?.extraCost ?? item?.extra_cost;
+      const remoteExtraCostValue = Number(remoteExtraCostRaw);
+      const remoteItemTaxAmountValue = Number(
+        item?.taxAmount ?? item?.tax_amount
+      );
+      const hasRemoteItemTaxAmount =
+        Number.isFinite(remoteItemTaxAmountValue) && remoteItemTaxAmountValue >= 0;
+      const hasRemoteUnitCost =
+        Number.isFinite(remoteUnitCostValue) && remoteUnitCostValue >= 0;
+      const hasRemoteExtraCost =
+        remoteExtraCostRaw !== null &&
+        remoteExtraCostRaw !== undefined &&
+        remoteExtraCostRaw !== "" &&
+        Number.isFinite(remoteExtraCostValue) &&
+        remoteExtraCostValue >= 0;
+
+      const unitCost = hasRemoteUnitCost
+        ? round2(remoteUnitCostValue)
+        : round2(toNumber(productCostRow?.costPrice, 0));
+      const extraCost = hasRemoteExtraCost
+        ? round2(remoteExtraCostValue)
+        : round2(toNumber(productCostRow?.extraCost, 0));
+      const taxPercentFromCatalog = toNumber(productCostRow?.taxPercent, 0);
+      const taxPercentFromItem = Number(item?.taxPercent ?? item?.tax_percent);
+      const hasTaxPercentFromItem =
+        Number.isFinite(taxPercentFromItem) && taxPercentFromItem > 0;
+      const hasTaxPercentFromCatalog =
+        Number.isFinite(taxPercentFromCatalog) && taxPercentFromCatalog > 0;
+      const taxPercentFromOrderShare =
+        grossRevenue > 0 && orderTaxShare > 0
+          ? round2((orderTaxShare / grossRevenue) * 100)
+          : 0;
+      const taxPercent =
+        hasTaxPercentFromItem
+          ? round2(taxPercentFromItem)
+          : hasTaxPercentFromCatalog
+            ? round2(taxPercentFromCatalog)
+            : taxPercentFromOrderShare;
+      const estimatedTaxFromPercent =
+        taxPercent > 0 && grossRevenue > 0
+          ? round2(grossRevenue * (taxPercent / 100))
+          : 0;
+      const itemTaxAmount = hasRemoteItemTaxAmount
+        ? round2(remoteItemTaxAmountValue)
+        : 0;
+      const appliedTaxAmount =
+        orderTaxShare > 0
+          ? orderTaxShare
+          : itemTaxAmount > 0
+            ? itemTaxAmount
+            : estimatedTaxFromPercent;
+      const hasCatalogUnitCost =
+        Number.isFinite(Number(productCostRow?.costPrice));
+      const unitCostMissing = !hasRemoteUnitCost && !hasCatalogUnitCost;
+      const productCost = round2(unitCost * quantity + extraCost);
+      const profit = round2(
+        grossRevenue - feeShare - shippingShare - productCost - appliedTaxAmount
+      );
+      const marginPercent = grossRevenue ? round2((profit / grossRevenue) * 100) : 0;
+      const roiPercent = productCost ? round2((profit / productCost) * 100) : 0;
 
       await prisma.orderItem.create({
         data: {
@@ -1533,8 +1796,9 @@ async function persistRemoteOrders(user, account, remoteOrders = [], lastSyncAt 
           unitPrice,
           totalPrice: grossRevenue,
           unitCost,
+          unitCostMissing,
           extraCost,
-          taxPercent: grossRevenue ? round2((taxShare / grossRevenue) * 100) : 0,
+          taxPercent,
           profit,
           marginPercent,
           roiPercent,
@@ -1628,22 +1892,7 @@ async function receiveWebhook(payload = {}) {
         orderBy: {
           updatedAt: "desc",
         },
-        select: {
-          id: true,
-          userId: true,
-          sellerId: true,
-          accountName: true,
-          accessToken: true,
-          refreshToken: true,
-          tokenType: true,
-          scope: true,
-          siteId: true,
-          integrationStatus: true,
-          tokenExpiresAt: true,
-          lastSyncedAt: true,
-          marketplace: true,
-          isActive: true,
-        },
+        select: MERCADO_LIVRE_ACCOUNT_SELECT,
       });
 
       if (account?.userId) {
@@ -1657,7 +1906,13 @@ async function receiveWebhook(payload = {}) {
         });
 
         if (user) {
-          const syncResult = await pullAndPersistQuestions(user, account);
+          const syncResult = await runAccountSyncWithLifecycle(
+            account.id,
+            async () => pullAndPersistQuestions(user, account),
+            {
+              resolveLastSyncAt: (result) => result?.lastSyncAt || null,
+            }
+          );
           queued = syncResult.synced;
           imported = syncResult.imported;
         }
@@ -1677,6 +1932,70 @@ async function receiveWebhook(payload = {}) {
   };
 }
 
+function hasPersistedIntegrationCredentials(account) {
+  return Boolean(account?.accessToken || account?.refreshToken);
+}
+
+function hasSellerIdentity(account) {
+  return Boolean(normalizeText(account?.sellerId));
+}
+
+function hasConnectedIntegrationStatus(account) {
+  return normalizeText(account?.integrationStatus).toLowerCase() === "connected";
+}
+
+function isMarketplaceAccountOperationallyConnected(account, currentMode) {
+  if (!account || currentMode === "mock") {
+    return false;
+  }
+
+  return (
+    Boolean(account.isActive) &&
+    hasConnectedIntegrationStatus(account) &&
+    hasSellerIdentity(account) &&
+    hasPersistedIntegrationCredentials(account)
+  );
+}
+
+function buildSyncPayloadFromAccount(account) {
+  if (!account) {
+    return {
+      status: SYNC_STATUS.IDLE,
+      statusLabel: getSyncStatusLabel(SYNC_STATUS.IDLE),
+      lastStartedAt: null,
+      lastFinishedAt: null,
+      lastSyncedAt: null,
+      lastError: null,
+    };
+  }
+
+  const syncStatus = normalizeSyncStatus(account.syncStatus);
+
+  return {
+    status: syncStatus,
+    statusLabel: getSyncStatusLabel(syncStatus),
+    lastStartedAt: account.syncLastStartedAt
+      ? account.syncLastStartedAt.toISOString()
+      : null,
+    lastFinishedAt: account.syncLastFinishedAt
+      ? account.syncLastFinishedAt.toISOString()
+      : null,
+    lastSyncedAt: account.lastSyncedAt ? account.lastSyncedAt.toISOString() : null,
+    lastError: account.syncLastError || null,
+  };
+}
+
+function resolveLastSyncTimestamp(...values) {
+  for (const value of values) {
+    const parsed = ensureDate(value, null);
+    if (parsed) {
+      return parsed.toISOString();
+    }
+  }
+
+  return null;
+}
+
 async function getIntegrationStatus(request = {}) {
   const user = await resolveViewerUser(request);
   const account = await resolveMercadoLivreAccount(user.id);
@@ -1688,12 +2007,15 @@ async function getIntegrationStatus(request = {}) {
       usingLive: false,
       hasCredentials: false,
       source: "none",
+      connectionStatus: "pending",
+      sync: buildSyncPayloadFromAccount(null),
       account: null,
       instructions: "Conecte uma conta do Mercado Livre para habilitar a integracao.",
     };
   }
 
-  const hasCredentials = Boolean(account.accessToken);
+  const hasCredentials = hasPersistedIntegrationCredentials(account);
+  const hasRefreshToken = Boolean(account.refreshToken);
   const tokenExpiresAt = account.tokenExpiresAt
     ? account.tokenExpiresAt.toISOString()
     : null;
@@ -1705,18 +2027,21 @@ async function getIntegrationStatus(request = {}) {
       new Date(tokenExpiresAt).getTime() > Date.now() &&
       new Date(tokenExpiresAt).getTime() - Date.now() <= 1000 * 60 * 60 * 24
   );
+  const usingLive = isMarketplaceAccountOperationallyConnected(account, currentMode);
+  const needsReconnect =
+    !usingLive || (tokenExpired && !hasRefreshToken);
 
   return {
     mode: currentMode,
-    usingLive:
-      currentMode !== "mock" &&
-      hasCredentials &&
-      Boolean(account.sellerId) &&
-      !tokenExpired,
+    usingLive,
     hasCredentials,
     source: hasCredentials ? "database" : "none",
+    connectionStatus: usingLive ? "connected" : "pending",
     tokenExpired,
     tokenExpiringSoon,
+    tokenCanRefresh: hasRefreshToken,
+    needsReconnect,
+    sync: buildSyncPayloadFromAccount(account),
     account: {
       sellerId: account.sellerId || null,
       accountName: account.accountName || null,
@@ -1724,10 +2049,19 @@ async function getIntegrationStatus(request = {}) {
       tokenExpiresAt,
       lastSyncedAt: account.lastSyncedAt ? account.lastSyncedAt.toISOString() : null,
       integrationStatus: account.integrationStatus || "disconnected",
+      syncStatus: normalizeSyncStatus(account.syncStatus),
+      syncStatusLabel: getSyncStatusLabel(account.syncStatus),
+      syncLastError: account.syncLastError || null,
+      syncLastStartedAt: account.syncLastStartedAt
+        ? account.syncLastStartedAt.toISOString()
+        : null,
+      syncLastFinishedAt: account.syncLastFinishedAt
+        ? account.syncLastFinishedAt.toISOString()
+        : null,
     },
-    instructions: hasCredentials
-      ? null
-      : "Conecte via OAuth ou configure credenciais para essa conta.",
+    instructions: needsReconnect
+      ? "Conecte via OAuth para restaurar a integracao desta conta."
+      : null,
   };
 }
 
@@ -1782,6 +2116,9 @@ async function disconnectIntegration(request = {}) {
       scope: null,
       tokenExpiresAt: null,
       integrationStatus: "disconnected",
+      syncStatus: SYNC_STATUS.IDLE,
+      syncLastError: null,
+      syncLastFinishedAt: new Date(),
     },
   });
 
@@ -1791,14 +2128,17 @@ async function disconnectIntegration(request = {}) {
   };
 }
 
-async function syncOrders(options = {}, request = {}) {
-  const user = await resolveViewerUser(request);
-  const account = await resolveMercadoLivreAccount(user.id);
+async function syncQuestionsForAccount(user, account) {
+  const syncResult = await pullAndPersistQuestions(user, account);
 
-  if (!account) {
-    throw createHttpError(404, "Nenhuma conta Mercado Livre encontrada.");
-  }
+  return {
+    synced: Boolean(syncResult?.synced),
+    imported: Number(syncResult?.imported || 0),
+    lastSyncAt: syncResult?.lastSyncAt || null,
+  };
+}
 
+async function syncOrdersForAccount(user, account, options = {}) {
   const accountWithFreshToken = await ensureLiveAccountToken(account);
   const canUseLive = await canUseLiveProvider(accountWithFreshToken);
 
@@ -1826,20 +2166,12 @@ async function syncOrders(options = {}, request = {}) {
 
   return {
     synced: true,
-    imported: persisted.imported,
-    lastSyncAt: persisted.lastSyncAt,
-    message: "Pedidos sincronizados com sucesso a partir da API do Mercado Livre.",
+    imported: Number(persisted?.imported || 0),
+    lastSyncAt: persisted?.lastSyncAt || null,
   };
 }
 
-async function syncItems(options = {}, request = {}) {
-  const user = await resolveViewerUser(request);
-  const account = await resolveMercadoLivreAccount(user.id);
-
-  if (!account) {
-    throw createHttpError(404, "Nenhuma conta Mercado Livre encontrada.");
-  }
-
+async function syncItemsForAccount(user, account, options = {}) {
   const accountWithFreshToken = await ensureLiveAccountToken(account);
   const canUseLive = await canUseLiveProvider(accountWithFreshToken);
 
@@ -1867,27 +2199,146 @@ async function syncItems(options = {}, request = {}) {
 
   return {
     synced: true,
-    imported: persisted.imported,
-    lastSyncAt: persisted.lastSyncAt,
+    imported: Number(persisted?.imported || 0),
+    lastSyncAt: persisted?.lastSyncAt || null,
+  };
+}
+
+async function syncMarketplaceDataForUserAndAccount(user, account, options = {}) {
+  const questions = await syncQuestionsForAccount(user, account);
+  const orders = await syncOrdersForAccount(user, account, options);
+  const items = await syncItemsForAccount(user, account, options);
+  const lastSyncAt = resolveLastSyncTimestamp(
+    items?.lastSyncAt,
+    orders?.lastSyncAt,
+    questions?.lastSyncAt
+  );
+
+  return {
+    synced: true,
+    summary: {
+      questionsImported: questions.imported || 0,
+      ordersImported: orders.imported || 0,
+      itemsImported: items.imported || 0,
+      lastSyncAt,
+    },
+  };
+}
+
+async function syncMarketplaceDataByAccountId(accountId, options = {}) {
+  const normalizedAccountId = normalizeText(accountId);
+  if (!normalizedAccountId) {
+    throw createHttpError(400, "Conta Mercado Livre invalida.");
+  }
+
+  const account = await prisma.marketplaceAccount.findFirst({
+    where: {
+      id: normalizedAccountId,
+      ...mercadoLivreAccountWhere(),
+    },
+    select: MERCADO_LIVRE_ACCOUNT_SELECT,
+  });
+
+  if (!account?.id || !account?.userId) {
+    throw createHttpError(404, "Conta Mercado Livre nao encontrada.");
+  }
+
+  const user = await prisma.user.findUnique({
+    where: {
+      id: account.userId,
+    },
+    select: {
+      id: true,
+    },
+  });
+
+  if (!user?.id) {
+    throw createHttpError(404, "Usuario da conta Mercado Livre nao encontrado.");
+  }
+
+  const result = await runAccountSyncWithLifecycle(
+    account.id,
+    async () => syncMarketplaceDataForUserAndAccount(user, account, options),
+    {
+      resolveLastSyncAt: (payload) => payload?.summary?.lastSyncAt || null,
+    }
+  );
+
+  return {
+    synced: true,
+    message: "Sincronizacao completa do Mercado Livre concluida.",
+    summary: result.summary,
+  };
+}
+
+async function syncOrders(options = {}, request = {}) {
+  const user = await resolveViewerUser(request);
+  const account = await resolveMercadoLivreAccount(user.id);
+
+  if (!account) {
+    throw createHttpError(404, "Nenhuma conta Mercado Livre encontrada.");
+  }
+
+  const result = await runAccountSyncWithLifecycle(
+    account.id,
+    async () => syncOrdersForAccount(user, account, options),
+    {
+      resolveLastSyncAt: (payload) => payload?.lastSyncAt || null,
+    }
+  );
+
+  return {
+    synced: true,
+    imported: result.imported,
+    lastSyncAt: result.lastSyncAt,
+    message: "Pedidos sincronizados com sucesso a partir da API do Mercado Livre.",
+  };
+}
+
+async function syncItems(options = {}, request = {}) {
+  const user = await resolveViewerUser(request);
+  const account = await resolveMercadoLivreAccount(user.id);
+
+  if (!account) {
+    throw createHttpError(404, "Nenhuma conta Mercado Livre encontrada.");
+  }
+
+  const result = await runAccountSyncWithLifecycle(
+    account.id,
+    async () => syncItemsForAccount(user, account, options),
+    {
+      resolveLastSyncAt: (payload) => payload?.lastSyncAt || null,
+    }
+  );
+
+  return {
+    synced: true,
+    imported: result.imported,
+    lastSyncAt: result.lastSyncAt,
     message: "Anuncios/produtos sincronizados com sucesso a partir da API do Mercado Livre.",
   };
 }
 
 async function syncMarketplaceData(options = {}, request = {}) {
-  const questions = await syncQuestions(options, request);
-  const orders = await syncOrders(options, request);
-  const items = await syncItems(options, request);
+  const user = await resolveViewerUser(request);
+  const account = await resolveMercadoLivreAccount(user.id);
+
+  if (!account) {
+    throw createHttpError(404, "Nenhuma conta Mercado Livre encontrada.");
+  }
+
+  const result = await runAccountSyncWithLifecycle(
+    account.id,
+    async () => syncMarketplaceDataForUserAndAccount(user, account, options),
+    {
+      resolveLastSyncAt: (payload) => payload?.summary?.lastSyncAt || null,
+    }
+  );
 
   return {
     synced: true,
     message: "Sincronizacao completa do Mercado Livre concluida.",
-    summary: {
-      questionsImported: questions?.meta?.filteredTotal || questions?.meta?.total || 0,
-      ordersImported: orders.imported || 0,
-      itemsImported: items.imported || 0,
-      lastSyncAt:
-        items.lastSyncAt || orders.lastSyncAt || questions?.meta?.lastSyncAt || null,
-    },
+    summary: result.summary,
   };
 }
 
@@ -1933,9 +2384,12 @@ async function listMarketplaceOrders(filters = {}, request = {}) {
       saleDate: row.saleDate ? row.saleDate.toISOString() : null,
       totalAmount: round2(row.totalAmount),
       marketplaceFee: round2(row.marketplaceFee),
+      marketplaceFeeMissing: Boolean(row.marketplaceFeeMissing),
       shippingFee: round2(row.shippingFee),
+      shippingFeeMissing: Boolean(row.shippingFeeMissing),
       discountAmount: round2(row.discountAmount),
       taxAmount: round2(row.taxAmount),
+      taxAmountMissing: Boolean(row.taxAmountMissing),
       netReceived: round2(row.netReceived),
       items: (row.items || []).map((item) => ({
         id: item.id,
@@ -1945,6 +2399,8 @@ async function listMarketplaceOrders(filters = {}, request = {}) {
         quantity: item.quantity,
         unitPrice: round2(item.unitPrice),
         totalPrice: round2(item.totalPrice),
+        unitCost: round2(item.unitCost),
+        unitCostMissing: Boolean(item.unitCostMissing),
       })),
     })),
     meta: {
@@ -2091,6 +2547,7 @@ module.exports = {
   refreshQuestions,
   replyQuestion,
   syncItems,
+  syncMarketplaceDataByAccountId,
   syncMarketplaceData,
   syncOrders,
   syncQuestions,

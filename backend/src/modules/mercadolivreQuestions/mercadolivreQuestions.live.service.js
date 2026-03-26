@@ -186,6 +186,243 @@ function toNumber(value, fallback = 0) {
   return parsed;
 }
 
+function parseOptionalNumber(value) {
+  if (value === null || value === undefined || value === "") {
+    return null;
+  }
+
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function normalizeImageUrl(value) {
+  const text = normalizeText(value);
+
+  if (!text) {
+    return null;
+  }
+
+  if (text.startsWith("//")) {
+    return `https:${text}`;
+  }
+
+  if (text.startsWith("http://")) {
+    return `https://${text.slice("http://".length)}`;
+  }
+
+  if (text.startsWith("https://")) {
+    return text;
+  }
+
+  return null;
+}
+
+function selectBestNumericValue(candidates = []) {
+  const parsed = candidates
+    .map((value) => parseOptionalNumber(value))
+    .filter((value) => value !== null);
+
+  if (!parsed.length) {
+    return { found: false, value: 0 };
+  }
+
+  const positive = parsed.filter((value) => value > 0);
+  if (positive.length) {
+    return { found: true, value: Math.max(...positive) };
+  }
+
+  return { found: true, value: parsed[0] };
+}
+
+function sumNumericValues(candidates = []) {
+  let found = false;
+  let total = 0;
+
+  for (const candidate of candidates) {
+    const parsed = parseOptionalNumber(candidate);
+    if (parsed === null) {
+      continue;
+    }
+
+    found = true;
+    total += parsed;
+  }
+
+  return {
+    found,
+    value: found ? total : 0,
+  };
+}
+
+function resolveItemThumbnail(item = {}) {
+  const pictures = Array.isArray(item?.pictures) ? item.pictures : [];
+  const pictureUrls = pictures.flatMap((picture) => [
+    picture?.secure_url,
+    picture?.url,
+  ]);
+
+  const attributes = Array.isArray(item?.attributes) ? item.attributes : [];
+  const attributeImageUrls = attributes
+    .filter((attribute) =>
+      ["MAIN_PICTURE", "PICTURE", "IMAGE", "THUMBNAIL"].includes(
+        String(attribute?.id || "").toUpperCase()
+      )
+    )
+    .flatMap((attribute) => [attribute?.value_name, attribute?.value_id]);
+
+  const [bestImage] = [
+    item?.picture_url,
+    item?.secure_thumbnail,
+    item?.thumbnail,
+    ...pictureUrls,
+    ...attributeImageUrls,
+  ]
+    .map((value) => normalizeImageUrl(value))
+    .filter(Boolean);
+
+  return bestImage || null;
+}
+
+function resolveMarketplaceFeeInfo(payments = []) {
+  const paymentRows = Array.isArray(payments) ? payments : [];
+  let found = false;
+  let total = 0;
+
+  for (const payment of paymentRows) {
+    const direct = selectBestNumericValue([
+      payment?.marketplace_fee,
+      payment?.marketplace_fee_amount,
+      payment?.sale_fee,
+      payment?.fee_amount,
+    ]);
+
+    const feeDetails = Array.isArray(payment?.fee_details)
+      ? payment.fee_details.reduce((sum, feeDetail) => {
+          const type = String(
+            feeDetail?.type || feeDetail?.fee_type || ""
+          ).toLowerCase();
+          const shouldUse =
+            !type ||
+            type.includes("market") ||
+            type.includes("sale") ||
+            type.includes("fee") ||
+            type.includes("financing");
+
+          if (!shouldUse) {
+            return sum;
+          }
+
+          const amount = parseOptionalNumber(
+            feeDetail?.amount !== undefined
+              ? feeDetail.amount
+              : feeDetail?.cost
+          );
+          return amount === null ? sum : sum + amount;
+        }, 0)
+      : null;
+
+    const hasFeeDetails = Number.isFinite(feeDetails);
+
+    if (direct.found) {
+      found = true;
+      total += direct.value;
+      continue;
+    }
+
+    if (hasFeeDetails) {
+      found = true;
+      total += Number(feeDetails);
+    }
+  }
+
+  return {
+    found,
+    value: found ? total : 0,
+  };
+}
+
+function resolveShippingFeeInfo(order = {}, payments = []) {
+  const direct = selectBestNumericValue([
+    order?.shipping?.cost,
+    order?.shipping?.base_cost,
+    order?.shipping?.receiver_shipping_cost,
+    order?.shipping?.list_cost,
+    order?.shipping_cost,
+  ]);
+
+  const fromPayments = sumNumericValues(
+    (Array.isArray(payments) ? payments : []).flatMap((payment) => [
+      payment?.shipping_cost,
+      payment?.shipping_amount,
+    ])
+  );
+
+  if (direct.found) {
+    return direct;
+  }
+
+  if (fromPayments.found) {
+    return fromPayments;
+  }
+
+  return {
+    found: false,
+    value: 0,
+  };
+}
+
+function resolveDiscountAmountInfo(order = {}) {
+  const couponAmount = parseOptionalNumber(order?.coupon?.amount);
+  const orderDiscountAmount = parseOptionalNumber(order?.discount_amount);
+  const shippingDiscount = parseOptionalNumber(order?.shipping?.discounts);
+  const direct = [couponAmount, orderDiscountAmount, shippingDiscount].filter(
+    (value) => value !== null
+  );
+
+  if (!direct.length) {
+    return { found: false, value: 0 };
+  }
+
+  return {
+    found: true,
+    value: direct.reduce((sum, value) => sum + value, 0),
+  };
+}
+
+function resolveTaxAmountInfo(order = {}, payments = []) {
+  const orderTax = selectBestNumericValue([
+    order?.tax_amount,
+    order?.taxes?.amount,
+    order?.taxes_amount,
+  ]);
+  const paymentTaxes = sumNumericValues(
+    (Array.isArray(payments) ? payments : []).flatMap((payment) => [
+      payment?.taxes_amount,
+      payment?.tax_amount,
+    ])
+  );
+
+  if (orderTax.found && paymentTaxes.found) {
+    return {
+      found: true,
+      value: Math.max(orderTax.value, paymentTaxes.value),
+    };
+  }
+
+  if (orderTax.found) {
+    return orderTax;
+  }
+
+  if (paymentTaxes.found) {
+    return paymentTaxes;
+  }
+
+  return {
+    found: false,
+    value: 0,
+  };
+}
+
 function resolveSyncRange(options = {}) {
   const hasDateOverrides = Boolean(options?.startDate || options?.endDate);
 
@@ -448,7 +685,7 @@ function mapQuestion(question = {}, itemData = {}) {
     buyerNickname:
       normalizeText(question?.from?.nickname) ||
       (question?.from?.id ? `Comprador ${question.from.id}` : "Comprador"),
-    thumbnail: normalizeText(itemData?.thumbnail) || null,
+    thumbnail: resolveItemThumbnail(itemData),
     sku: buildItemSku(itemData),
     rawPayload: question,
   };
@@ -457,13 +694,10 @@ function mapQuestion(question = {}, itemData = {}) {
 function mapOrderEntry(order = {}) {
   const orderItems = Array.isArray(order.order_items) ? order.order_items : [];
   const payments = Array.isArray(order.payments) ? order.payments : [];
-
-  const marketplaceFee = payments.reduce((sum, payment) => {
-    return sum + toNumber(payment.marketplace_fee, 0);
-  }, 0);
-
-  const shippingFee = toNumber(order?.shipping?.cost, 0);
-  const discountAmount = toNumber(order?.coupon?.amount, 0);
+  const marketplaceFeeInfo = resolveMarketplaceFeeInfo(payments);
+  const shippingFeeInfo = resolveShippingFeeInfo(order, payments);
+  const discountAmountInfo = resolveDiscountAmountInfo(order);
+  const taxAmountInfo = resolveTaxAmountInfo(order, payments);
   const totalAmount = toNumber(order.total_amount || order.paid_amount, 0);
 
   return {
@@ -474,26 +708,60 @@ function mapOrderEntry(order = {}) {
       new Date().toISOString(),
     buyerName: normalizeText(order?.buyer?.nickname) || "Comprador",
     totalAmount,
-    marketplaceFee,
-    shippingFee,
-    discountAmount,
-    taxAmount: 0,
-    netReceived: totalAmount - marketplaceFee - shippingFee - discountAmount,
+    marketplaceFee: marketplaceFeeInfo.found ? marketplaceFeeInfo.value : null,
+    marketplaceFeeDataFound: marketplaceFeeInfo.found,
+    shippingFee: shippingFeeInfo.found ? shippingFeeInfo.value : null,
+    shippingFeeDataFound: shippingFeeInfo.found,
+    discountAmount: discountAmountInfo.found ? discountAmountInfo.value : null,
+    discountAmountDataFound: discountAmountInfo.found,
+    taxAmount: taxAmountInfo.found ? taxAmountInfo.value : null,
+    taxAmountDataFound: taxAmountInfo.found,
+    netReceived:
+      totalAmount -
+      (marketplaceFeeInfo.found ? marketplaceFeeInfo.value : 0) -
+      (shippingFeeInfo.found ? shippingFeeInfo.value : 0) -
+      (discountAmountInfo.found ? discountAmountInfo.value : 0) -
+      (taxAmountInfo.found ? taxAmountInfo.value : 0),
     items: orderItems.map((entry) => {
       const quantity = toNumber(entry?.quantity, 0);
-      const unitPrice = toNumber(entry?.unit_price, 0);
+      const unitPrice = toNumber(entry?.unit_price ?? entry?.full_unit_price, 0);
+      const fullUnitPrice = parseOptionalNumber(entry?.full_unit_price);
+      const lineTotal = Number.isFinite(fullUnitPrice)
+        ? toNumber(fullUnitPrice * quantity, quantity * unitPrice)
+        : quantity * unitPrice;
+      const taxPercent = parseOptionalNumber(
+        entry?.tax_percent ??
+          entry?.taxes?.percentage ??
+          entry?.item?.tax_percent ??
+          entry?.item?.taxes?.percentage
+      );
+      const taxAmount = parseOptionalNumber(
+        entry?.tax_amount ?? entry?.taxes?.amount
+      );
+      const unitCost = parseOptionalNumber(
+        entry?.unit_cost ?? entry?.cost ?? entry?.item?.unit_cost
+      );
+      const extraCost = parseOptionalNumber(
+        entry?.extra_cost ?? entry?.extraCost
+      );
+      const marketplaceItemId = normalizeText(entry?.item?.id);
+      const itemData = entry?.item || {};
 
       return {
-        marketplaceItemId: normalizeText(entry?.item?.id),
-        title: normalizeText(entry?.item?.title) || "Item sem titulo",
-        thumbnail: normalizeText(entry?.item?.thumbnail) || null,
+        marketplaceItemId,
+        title: normalizeText(itemData?.title) || "Item sem titulo",
+        thumbnail: resolveItemThumbnail(itemData),
         sku:
-          normalizeText(entry?.item?.seller_sku) ||
-          normalizeText(entry?.item?.seller_custom_field) ||
+          buildItemSku(itemData) ||
+          normalizeText(entry?.seller_sku) ||
           null,
         quantity,
         unitPrice,
-        totalPrice: quantity * unitPrice,
+        totalPrice: toNumber(lineTotal, quantity * unitPrice),
+        taxPercent,
+        taxAmount,
+        unitCost,
+        extraCost,
       };
     }),
     rawPayload: order,
@@ -528,7 +796,7 @@ function mapItemEntry(item = {}) {
     price: toNumber(item?.price, 0),
     status: normalizeText(item?.status) || "unknown",
     availableQuantity: Number(toNumber(item?.available_quantity, 0)),
-    thumbnail: normalizeText(item?.thumbnail) || null,
+    thumbnail: resolveItemThumbnail(item),
     category: normalizeText(item?.category_id) || null,
     sku: buildItemSku(item),
     rawPayload: item,
@@ -786,11 +1054,62 @@ async function pullOrdersFromApi(accountTokenSource = {}, options = {}) {
     }
   }
 
+  const itemIds = Array.from(
+    new Set(
+      orders
+        .flatMap((order) => (Array.isArray(order?.items) ? order.items : []))
+        .map((item) => normalizeText(item?.marketplaceItemId))
+        .filter(Boolean)
+    )
+  );
+  let itemDetailsById = new Map();
+
+  if (itemIds.length) {
+    const itemDetailsResult = await fetchItemsByIds(itemIds, {
+      ...accountTokenSource,
+      ...(latestTokenState
+        ? {
+            accessToken: latestTokenState.accessToken,
+            refreshToken: latestTokenState.refreshToken,
+          }
+        : {}),
+    });
+
+    itemDetailsById = itemDetailsResult?.itemsById || new Map();
+    if (itemDetailsResult?.tokenState) {
+      latestTokenState = itemDetailsResult.tokenState;
+    }
+  }
+
+  const enrichedOrders = orders.map((order) => {
+    const enrichedItems = (order.items || []).map((item) => {
+      const marketplaceItemId = normalizeText(item?.marketplaceItemId);
+      const itemDetails = marketplaceItemId
+        ? itemDetailsById.get(marketplaceItemId)
+        : null;
+
+      return {
+        ...item,
+        title: normalizeText(itemDetails?.title) || item.title,
+        thumbnail:
+          resolveItemThumbnail(itemDetails || {}) ||
+          item.thumbnail ||
+          null,
+        sku: buildItemSku(itemDetails || {}) || item.sku || null,
+      };
+    });
+
+    return {
+      ...order,
+      items: enrichedItems,
+    };
+  });
+
   return {
-    items: orders,
+    items: enrichedOrders,
     meta: {
       source: "mercado-livre-api",
-      total: orders.length,
+      total: enrichedOrders.length,
       lastSyncAt: new Date().toISOString(),
       range: {
         startDate: syncRange.startDateOnly,

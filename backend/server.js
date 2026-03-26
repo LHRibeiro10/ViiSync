@@ -7,8 +7,8 @@ const {
   getAccounts,
   getChartData,
   getDashboard,
+  getOrdersPayload,
   listAdditionalCosts,
-  getOrders,
   getProducts,
   getProfitReport,
   getProfitTable,
@@ -29,6 +29,10 @@ const {
   handleMercadoLivreWebhook,
   handleMercadoLivreOAuthCallback,
 } = require("./src/modules/mercadolivreQuestions/mercadolivreQuestions.controller");
+const {
+  startMercadoLivreAutoSyncScheduler,
+  stopMercadoLivreAutoSyncScheduler,
+} = require("./src/modules/mercadolivreQuestions/mercadolivreAutoSync.scheduler");
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -131,7 +135,7 @@ app.get("/profit-report", requireAuth, async (req, res) => {
 
 app.get("/orders", requireAuth, async (req, res) => {
   try {
-    res.json(await getOrders(req));
+    res.json(await getOrdersPayload(req.query, req));
   } catch (error) {
     handleUnexpectedError("orders", error, res);
   }
@@ -241,11 +245,26 @@ app.get(
 app.use("/integrations/mercadolivre", requireAuth, mercadolivreQuestionsRoutes);
 app.post("/webhooks/mercadolivre", handleMercadoLivreWebhook);
 
+startMercadoLivreAutoSyncScheduler();
+
 const server = app.listen(PORT, HOST, () => {
   console.log(`Servidor rodando em http://${HOST}:${PORT}`);
 });
 
 server.on("error", (error) => {
   console.error("[server.listen:error]", error);
+  stopMercadoLivreAutoSyncScheduler();
   process.exit(1);
 });
+
+function shutdownServer(signal) {
+  console.log(`[server] Encerrando processo (${signal})...`);
+  stopMercadoLivreAutoSyncScheduler();
+
+  server.close(() => {
+    process.exit(0);
+  });
+}
+
+process.on("SIGINT", () => shutdownServer("SIGINT"));
+process.on("SIGTERM", () => shutdownServer("SIGTERM"));

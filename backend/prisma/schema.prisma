@@ -140,6 +140,11 @@ model MarketplaceAccount {
   integrationStatus String @default("disconnected")
   tokenExpiresAt DateTime?
   lastSyncedAt   DateTime?
+  autoSyncEnabled Boolean @default(true)
+  syncStatus      String   @default("idle")
+  syncLastStartedAt DateTime?
+  syncLastFinishedAt DateTime?
+  syncLastError     String?
   isActive       Boolean   @default(true)
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
@@ -195,9 +200,12 @@ model Order {
   saleDate             DateTime
   totalAmount          Float
   marketplaceFee       Float    @default(0)
+  marketplaceFeeMissing Boolean @default(false)
   shippingFee          Float    @default(0)
+  shippingFeeMissing   Boolean  @default(false)
   discountAmount       Float    @default(0)
   taxAmount            Float    @default(0)
+  taxAmountMissing     Boolean  @default(false)
   netReceived          Float    @default(0)
   cancelled            Boolean  @default(false)
   createdAt            DateTime @default(now())
@@ -219,6 +227,7 @@ model OrderItem {
   unitPrice         Float
   totalPrice        Float
   unitCost          Float    @default(0)
+  unitCostMissing   Boolean  @default(false)
   extraCost         Float    @default(0)
   taxPercent        Float    @default(0)
   profit            Float    @default(0)

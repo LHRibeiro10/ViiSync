@@ -887,6 +887,34 @@ function isMercadoLivreMarketplace(value) {
   return normalized.includes("mercado livre") || normalized.includes("mercadolivre");
 }
 
+function normalizeSyncStatus(status) {
+  const normalized = String(status || "").trim().toLowerCase();
+
+  if (["idle", "syncing", "success", "error"].includes(normalized)) {
+    return normalized;
+  }
+
+  return "idle";
+}
+
+function getSyncStatusLabel(status) {
+  const normalized = normalizeSyncStatus(status);
+
+  if (normalized === "syncing") {
+    return "Sincronizando";
+  }
+
+  if (normalized === "success") {
+    return "Sucesso";
+  }
+
+  if (normalized === "error") {
+    return "Erro";
+  }
+
+  return "Aguardando";
+}
+
 async function getIntegrationHub(request = {}) {
   const user = await resolveViewerUser(request);
   const now = new Date();
@@ -949,47 +977,82 @@ async function getIntegrationHub(request = {}) {
   const accountsPayload = accounts
     .filter((account) => isMercadoLivreMarketplace(account.marketplace))
     .map((account) => {
-      const hasToken = Boolean(account.accessToken);
+      const hasAccessToken = Boolean(account.accessToken);
+      const hasRefreshToken = Boolean(account.refreshToken);
+      const hasCredentials = hasAccessToken || hasRefreshToken;
+      const hasSellerId = Boolean(String(account.sellerId || "").trim());
+      const integrationConnected =
+        String(account.integrationStatus || "").trim().toLowerCase() === "connected";
       const tokenExpiresAtMs = account.tokenExpiresAt
         ? new Date(account.tokenExpiresAt).getTime()
         : null;
-      const tokenExpired = Boolean(hasToken && tokenExpiresAtMs && tokenExpiresAtMs <= nowMs);
+      const tokenExpired = Boolean(
+        hasAccessToken && tokenExpiresAtMs && tokenExpiresAtMs <= nowMs
+      );
       const tokenExpiringSoon = Boolean(
-        hasToken &&
+        hasAccessToken &&
           tokenExpiresAtMs &&
           tokenExpiresAtMs > nowMs &&
           tokenExpiresAtMs - nowMs <= 1000 * 60 * 60 * 48
       );
-      const reconnectRecommended = !hasToken || tokenExpired || tokenExpiringSoon;
+      const connected =
+        Boolean(account.isActive) &&
+        integrationConnected &&
+        hasSellerId &&
+        hasCredentials;
+      const reconnectRecommended = !connected || (tokenExpired && !hasRefreshToken);
       const queueBacklog = Number(pendingByAccountId.get(account.id) || 0);
+      const syncStatus = normalizeSyncStatus(account.syncStatus);
+      const syncStatusLabel = getSyncStatusLabel(syncStatus);
+      const lastSyncAt = (
+        account.lastSyncedAt ||
+        account.syncLastFinishedAt ||
+        account.updatedAt
+      )?.toISOString?.() || null;
 
       let tokenStatus = "Sem token";
-      if (hasToken && tokenExpired) {
+      if (hasAccessToken && tokenExpired && hasRefreshToken) {
+        tokenStatus = "Expirado (renovavel)";
+      } else if (hasAccessToken && tokenExpired) {
         tokenStatus = "Expirado";
-      } else if (hasToken && tokenExpiringSoon) {
+      } else if (hasAccessToken && tokenExpiringSoon) {
         tokenStatus = "Expira em breve";
-      } else if (hasToken) {
+      } else if (hasAccessToken) {
         tokenStatus = "Ativo";
+      } else if (hasRefreshToken) {
+        tokenStatus = "Renovavel";
       }
 
       return {
         id: account.id,
         name: account.accountName || "Conta Mercado Livre",
         marketplace: account.marketplace || "Mercado Livre",
-        status: reconnectRecommended ? "Reconectar" : "Conectada",
+        status: connected ? "Conectado" : "Pendente",
+        connected,
         reconnectRecommended,
-        lastSyncAt: (account.lastSyncedAt || account.updatedAt).toISOString(),
+        lastSyncAt,
         latency: "N/D",
         queueBacklog,
         tokenStatus,
+        syncStatus,
+        syncStatusLabel,
+        syncLastError: account.syncLastError || null,
+        syncLastStartedAt: account.syncLastStartedAt
+          ? account.syncLastStartedAt.toISOString()
+          : null,
+        syncLastFinishedAt: account.syncLastFinishedAt
+          ? account.syncLastFinishedAt.toISOString()
+          : null,
         note: reconnectRecommended
-          ? "Conecte via OAuth para sincronizar perguntas e manter o token valido."
-          : "Conta pronta para sincronizacao operacional com o Mercado Livre.",
+          ? "Conecte via OAuth para sincronizar perguntas, pedidos e produtos."
+          : syncStatus === "error" && account.syncLastError
+            ? `Ultima falha: ${String(account.syncLastError).slice(0, 180)}`
+            : "Conta pronta para sincronizacao operacional com o Mercado Livre.",
       };
     });
 
   const connectedCount = accountsPayload.filter(
-    (account) => !account.reconnectRecommended
+    (account) => account.connected
   ).length;
   const reconnectCount = accountsPayload.filter(
     (account) => account.reconnectRecommended
@@ -1030,7 +1093,7 @@ async function getIntegrationHub(request = {}) {
     id: `event-${account.id}`,
     title: account.reconnectRecommended
       ? `${account.name} precisa de reconexao`
-      : `${account.name} conectada com sucesso`,
+      : `${account.name} em status ${account.syncStatusLabel.toLowerCase()}`,
     source: "Mercado Livre",
     createdAt: account.lastSyncAt,
   }));
@@ -1054,7 +1117,7 @@ async function getIntegrationHub(request = {}) {
         id: `action-reconnect-${account.id}`,
         title: `Reconectar ${account.name}`,
         description:
-          "A conta esta sem token valido. Refaça a autorizacao para normalizar a sincronizacao.",
+          "A conta esta sem credenciais validas. Refaca a autorizacao para normalizar a sincronizacao.",
         cta: "Reconectar agora",
       });
     });
