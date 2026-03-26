@@ -2,6 +2,34 @@ import { useEffect, useState } from "react";
 import MercadoLivreQuestionThumbnail from "./MercadoLivreQuestionThumbnail";
 import { formatQuestionDate } from "../../utils/mercadoLivreQuestions";
 
+function buildPriorityDescriptor(question) {
+  if (question.isAnswered) {
+    return {
+      tone: "resolved",
+      label: "Concluida",
+    };
+  }
+
+  if (question.isUrgent) {
+    return {
+      tone: "urgent",
+      label: "Prioridade alta",
+    };
+  }
+
+  if (question.needsAttention) {
+    return {
+      tone: "attention",
+      label: "Em atencao",
+    };
+  }
+
+  return {
+    tone: "pending",
+    label: "Fila regular",
+  };
+}
+
 function MercadoLivreQuestionDetails({
   question,
   loading,
@@ -12,6 +40,9 @@ function MercadoLivreQuestionDetails({
   onUseSuggestedReply,
   onSubmitReply,
   onRetry,
+  onRefreshQuestions,
+  onClearFilters,
+  hasVisibleQuestions,
   replyLoading,
 }) {
   const [copyFeedback, setCopyFeedback] = useState("");
@@ -76,15 +107,47 @@ function MercadoLivreQuestionDetails({
     return (
       <section className="panel ml-questions-detail-panel">
         <div className="ml-questions-detail-empty">
-          <strong>Selecione uma pergunta para abrir o painel de detalhes.</strong>
+          <strong>
+            {hasVisibleQuestions
+              ? "Selecione uma pergunta para abrir o painel operacional."
+              : "Sem pergunta visivel no painel lateral neste recorte."}
+          </strong>
           <p>
-            Aqui voce consegue analisar o contexto da pergunta, copiar o texto e
-            responder direto no fluxo operacional.
+            {hasVisibleQuestions
+              ? "Depois de selecionar um item da fila, voce consegue revisar contexto e responder sem sair da central."
+              : "Atualize dados da central, revise filtros e periodo para retomar o fluxo de atendimento."}
           </p>
+
+          <div className="ml-questions-empty-actions">
+            <button
+              type="button"
+              onClick={onRefreshQuestions || onRetry}
+              disabled={!onRefreshQuestions && !onRetry}
+            >
+              Atualizar fila
+            </button>
+            <button
+              type="button"
+              onClick={onClearFilters}
+              disabled={!onClearFilters}
+            >
+              Limpar filtros
+            </button>
+          </div>
+
+          <div className="ml-questions-ai-preview is-empty">
+            <strong>Assistente de resposta (em breve)</strong>
+            <p>
+              Este espaco sera usado para sugerir resposta, resumir contexto e
+              orientar tom profissional com validacao humana.
+            </p>
+          </div>
         </div>
       </section>
     );
   }
+
+  const priorityDescriptor = buildPriorityDescriptor(question);
 
   return (
     <section className="panel ml-questions-detail-panel">
@@ -143,6 +206,11 @@ function MercadoLivreQuestionDetails({
               : question.openDurationLabel || "--"}
           </strong>
         </div>
+
+        <div className={`ml-questions-metric-pill is-${priorityDescriptor.tone}`}>
+          <span>Prioridade operacional</span>
+          <strong>{priorityDescriptor.label}</strong>
+        </div>
       </div>
 
       <div className="ml-questions-detail-section">
@@ -193,8 +261,12 @@ function MercadoLivreQuestionDetails({
             <h3>{question.isAnswered ? "Resposta concluida" : "Responder pergunta"}</h3>
             <p>
               {question.isAnswered
-                ? "A pergunta ja esta encerrada."
-                : "Monte a resposta e atualize o status imediatamente."}
+                ? "Pergunta encerrada e historico salvo para consulta."
+                : question.isUrgent
+                  ? "Prioridade alta: responda agora para proteger reputacao e conversao."
+                  : question.needsAttention
+                    ? "Responder hoje evita escalonamento para urgente."
+                    : "Responda com clareza para manter o fluxo de atendimento saudavel."}
             </p>
           </div>
         </div>
@@ -248,6 +320,36 @@ function MercadoLivreQuestionDetails({
             {replyFeedback.message}
           </div>
         ) : null}
+      </div>
+
+      <div className="ml-questions-detail-section">
+        <div className="ml-questions-detail-section-head">
+          <div>
+            <h3>Assistente de resposta (em breve)</h3>
+            <p>
+              Bloco reservado para inteligencia assistida sem alterar o fluxo atual de atendimento.
+            </p>
+          </div>
+        </div>
+
+        <div className="ml-questions-ai-preview">
+          <p>
+            Em breve, este painel podera sugerir resposta, resumir contexto do
+            anuncio e ajustar tom profissional, mantendo sua aprovacao antes do envio.
+          </p>
+
+          <div className="ml-questions-ai-actions">
+            <button type="button" className="ml-questions-secondary-button" disabled>
+              Sugerir resposta
+            </button>
+            <button type="button" className="ml-questions-secondary-button" disabled>
+              Resumir contexto
+            </button>
+            <button type="button" className="ml-questions-secondary-button" disabled>
+              Tom profissional
+            </button>
+          </div>
+        </div>
       </div>
 
       <div className="ml-questions-detail-section">

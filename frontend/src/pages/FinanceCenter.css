@@ -269,8 +269,55 @@
   grid-template-columns: minmax(0, 1fr) minmax(0, 0.95fr);
 }
 
+.finance-channel-panel {
+  border: 1px solid var(--warning-border);
+}
+
+.finance-channel-priority-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.finance-channel-priority-card {
+  padding: 14px 16px;
+  border-radius: 16px;
+  border: 1px solid var(--border-strong);
+  background: var(--surface-inset);
+  box-shadow: var(--surface-shadow-inset);
+}
+
+.finance-channel-priority-card.is-warning {
+  border-color: var(--warning-border);
+  background: linear-gradient(180deg, var(--warning-soft) 0%, var(--surface-inset) 100%);
+}
+
+.finance-channel-priority-card span {
+  display: block;
+  margin-bottom: 6px;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.finance-channel-priority-card strong {
+  color: var(--text-strong);
+}
+
+.finance-channel-priority-card p {
+  margin: 8px 0 0;
+  color: var(--text);
+  line-height: 1.6;
+}
+
 .finance-channel-list {
   grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.finance-channel-card.is-priority {
+  border-color: var(--warning-border);
+  background: linear-gradient(180deg, var(--warning-soft) 0%, var(--panel-surface-inset) 100%);
 }
 
 .finance-channel-card p {
@@ -284,7 +331,33 @@
 .finance-insight-item {
   display: grid;
   grid-template-columns: auto 1fr;
-  gap: 12px;
+  gap: 14px;
+  align-items: flex-start;
+  padding: 14px 16px;
+  border-radius: 16px;
+  border: 1px solid var(--border-strong);
+  background: var(--surface-inset);
+  box-shadow: var(--surface-shadow-inset);
+}
+
+.finance-insight-item strong {
+  color: var(--text-strong);
+  line-height: 1.45;
+}
+
+.finance-insight-item.is-warning {
+  border-color: var(--warning-border);
+  background: linear-gradient(180deg, var(--warning-soft) 0%, var(--surface-inset) 100%);
+}
+
+.finance-insight-item.is-critical {
+  border-color: var(--danger-border);
+  background: linear-gradient(180deg, var(--danger-soft) 0%, var(--surface-inset) 100%);
+}
+
+.finance-insight-item.is-success {
+  border-color: var(--success-border);
+  background: linear-gradient(180deg, var(--success-soft) 0%, var(--surface-inset) 100%);
 }
 
 .finance-insight-dot {
@@ -294,6 +367,21 @@
   border-radius: 999px;
   background: linear-gradient(135deg, var(--accent-strong) 0%, var(--accent) 100%);
   box-shadow: 0 0 0 6px var(--accent-soft);
+}
+
+.finance-insight-dot.is-warning {
+  background: var(--warning);
+  box-shadow: 0 0 0 6px var(--warning-soft);
+}
+
+.finance-insight-dot.is-critical {
+  background: var(--danger);
+  box-shadow: 0 0 0 6px var(--danger-soft);
+}
+
+.finance-insight-dot.is-success {
+  background: var(--success);
+  box-shadow: 0 0 0 6px var(--success-soft);
 }
 
 .finance-invoices-panel {
@@ -400,8 +488,29 @@
   color: var(--text);
 }
 
+.finance-empty-state strong {
+  display: block;
+  color: var(--text-strong);
+}
+
+.finance-empty-state p {
+  margin: 8px 0 0;
+  color: var(--text);
+  line-height: 1.6;
+}
+
 .finance-receivables-grid {
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
+.finance-receivables-grid > .finance-empty-state,
+.finance-cashflow-list > .finance-empty-state,
+.finance-list > .finance-empty-state,
+.finance-bridge-grid > .finance-empty-state,
+.finance-invoice-list > .finance-empty-state,
+.finance-channel-list > .finance-empty-state,
+.finance-insight-list > .finance-empty-state {
+  grid-column: 1 / -1;
 }
 
 .finance-receivable-card {
@@ -436,13 +545,18 @@
 
 .finance-invoice-sync-note {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 12px;
   padding: 14px 16px;
   border-radius: 16px;
   border: 1px solid var(--border-strong);
   background: var(--surface-inset);
+}
+
+.finance-invoice-sync-note div {
+  display: grid;
+  gap: 4px;
 }
 
 .finance-invoice-sync-note span {
@@ -453,6 +567,15 @@
 
 .finance-invoice-sync-note strong {
   color: var(--text-strong);
+}
+
+.finance-invoice-sync-note p {
+  margin: 0;
+  max-width: 360px;
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.6;
+  text-align: right;
 }
 
 .finance-invoice-item {
@@ -610,6 +733,10 @@
   .finance-secondary-grid {
     grid-template-columns: 1fr;
   }
+
+  .finance-channel-priority-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 @media (max-width: 720px) {
@@ -656,5 +783,14 @@
   .finance-period-switcher button {
     flex: 1;
     min-width: 0;
+  }
+
+  .finance-invoice-sync-note {
+    flex-direction: column;
+  }
+
+  .finance-invoice-sync-note p {
+    max-width: none;
+    text-align: left;
   }
 }

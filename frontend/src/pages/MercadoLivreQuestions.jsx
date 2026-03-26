@@ -317,21 +317,21 @@ function MercadoLivreQuestions() {
       id: "pending",
       label: "Nao respondidas",
       value: overview.unanswered,
-      description: "Perguntas em aberto pedindo retorno da operacao.",
+      description: "Trate primeiro as mais antigas para evitar impacto em conversao.",
       tone: "warning",
     },
     {
       id: "answered",
       label: "Respondidas",
       value: overview.answered,
-      description: `${formatResponseRate(overview.responseRate)} da fila tratada no canal.`,
+      description: `${formatResponseRate(overview.responseRate)} da fila concluida no recorte atual.`,
       tone: "success",
     },
     {
       id: "urgent",
       label: "Urgentes",
       value: overview.urgent,
-      description: "Perguntas antigas sem resposta para tratar primeiro.",
+      description: "Prioridade imediata para reduzir risco operacional e reputacional.",
       tone: "danger",
     },
     {
@@ -352,9 +352,18 @@ function MercadoLivreQuestions() {
         title="Perguntas do Mercado Livre"
         description="Centralize a caixa de perguntas dos anuncios, filtre a fila e responda sem sair do ViiSync."
       >
-        <div className="ml-questions-header-chip">
+        <div
+          className={`ml-questions-header-chip ${
+            overview.urgent > 0 ? "is-critical" : ""
+          }`}
+        >
           <strong>{overview.unanswered}</strong>
           <span>pendentes</span>
+          <small>
+            {overview.urgent > 0
+              ? `${overview.urgent} urgente(s) para priorizar`
+              : "fila sem urgencias criticas"}
+          </small>
         </div>
         <button
           type="button"
@@ -368,8 +377,11 @@ function MercadoLivreQuestions() {
       <div className="ml-questions-page-subtitle">
         <span>{formatQuestionSyncLabel(questionsPayload?.meta?.lastSyncAt)}</span>
         <span>
-          {questionsPayload?.meta?.filteredTotal || 0} pergunta(s) visiveis no
-          recorte atual
+          {questionsPayload?.meta?.filteredTotal || 0} pergunta(s) visiveis no recorte
+          atual |{" "}
+          {overview.urgent > 0
+            ? `${overview.urgent} urgente(s) exigem resposta imediata`
+            : "sem urgencias criticas no momento"}
         </span>
       </div>
 
@@ -434,6 +446,9 @@ function MercadoLivreQuestions() {
           onUseSuggestedReply={setReplyDraft}
           onSubmitReply={handleReplySubmit}
           onRetry={handleRetryDetails}
+          onRefreshQuestions={handleRefreshQuestions}
+          onClearFilters={handleClearFilters}
+          hasVisibleQuestions={(questionsPayload?.items || []).length > 0}
           replyLoading={replyLoading}
         />
       </div>

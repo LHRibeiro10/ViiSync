@@ -82,13 +82,22 @@
 }
 
 .expenses-panel {
-  padding: 24px;
+  padding: 22px;
 }
 
 .expenses-layout {
   display: flex;
   flex-direction: column;
-  gap: 20px;
+  gap: 18px;
+}
+
+.expenses-input-block,
+.expenses-impact-panel {
+  border: 1px solid var(--border-strong);
+  border-radius: 20px;
+  background: var(--panel-surface-inset);
+  padding: 16px;
+  box-shadow: var(--surface-shadow-inset);
 }
 
 .expenses-form {
@@ -149,46 +158,91 @@
 }
 
 .expenses-form-error {
-  margin: -6px 0 0;
+  margin: 10px 0 0;
   color: var(--danger);
   font-size: 14px;
   font-weight: 600;
 }
 
+.expenses-impact-header h3,
+.expenses-list-header h3 {
+  margin: 0;
+  color: var(--text-strong);
+  font-size: 16px;
+  line-height: 1.35;
+}
+
+.expenses-impact-header p,
+.expenses-list-header p {
+  margin: 8px 0 0;
+  color: var(--text-muted);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.expenses-list-header {
+  display: grid;
+  gap: 2px;
+}
+
 .expenses-summary {
+  margin-top: 14px;
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 16px;
+  gap: 12px;
 }
 
 .expenses-summary-card {
-  border-radius: 20px;
+  border-radius: 18px;
   border: 1px solid var(--border-strong);
-  background: var(--panel-surface-inset);
-  padding: 20px;
-  box-shadow: var(--interactive-shadow), var(--surface-shadow-inset);
+  background: var(--surface-inset);
+  padding: 16px 18px;
+  box-shadow: var(--surface-shadow-inset);
 }
 
 .expenses-summary-card span {
   display: block;
-  margin-bottom: 10px;
+  margin-bottom: 8px;
   color: var(--text-muted);
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
 }
 
 .expenses-summary-card strong {
   display: block;
   color: var(--text-strong);
-  font-size: 28px;
-  line-height: 1.05;
-  letter-spacing: -0.03em;
+  font-size: 24px;
+  line-height: 1.1;
+  letter-spacing: -0.02em;
 }
 
 .expenses-summary-card p {
-  margin: 10px 0 0;
+  margin: 8px 0 0;
   color: var(--text-muted);
-  font-size: 13px;
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.expenses-summary-card.is-warning {
+  border-color: var(--warning-border);
+  background: linear-gradient(180deg, var(--warning-soft) 0%, var(--surface-inset) 100%);
+}
+
+.expenses-summary-card.is-positive {
+  border-color: var(--success-border);
+  background: linear-gradient(180deg, var(--success-soft) 0%, var(--surface-inset) 100%);
+}
+
+.expenses-summary-card.is-negative {
+  border-color: var(--danger-border);
+  background: linear-gradient(180deg, var(--danger-soft) 0%, var(--surface-inset) 100%);
+}
+
+.expenses-list {
+  display: grid;
+  gap: 12px;
 }
 
 .expense-row {
@@ -237,11 +291,14 @@
 }
 
 .expenses-empty {
-  border-top: 1px solid var(--row-border);
-  padding-top: 20px;
+  border: 1px dashed var(--border-strong);
+  border-radius: 18px;
+  background: var(--panel-surface-inset);
+  padding: 18px;
   color: var(--text-muted);
-  font-size: 15px;
+  font-size: 14px;
   font-weight: 600;
+  line-height: 1.6;
 }
 
 .expenses-footer {
@@ -276,6 +333,42 @@
 .expenses-export-button:disabled {
   opacity: 0.7;
   cursor: not-allowed;
+}
+
+.reports-focus-panel .panel {
+  border: 1px solid var(--border-strong);
+}
+
+.reports-focus-panel.is-channel .panel {
+  border-color: var(--accent-soft-strong);
+  background: linear-gradient(180deg, var(--accent-soft) 0%, var(--panel-surface) 100%);
+}
+
+.reports-focus-panel.is-products .panel {
+  border-color: var(--success-border);
+  background: linear-gradient(180deg, var(--success-soft) 0%, var(--panel-surface) 100%);
+}
+
+.reports-analytic-row {
+  border-left: 3px solid transparent;
+}
+
+.reports-focus-panel.is-channel .reports-analytic-row:first-of-type {
+  border-left-color: var(--accent);
+}
+
+.reports-focus-panel.is-products .reports-analytic-row:first-of-type {
+  border-left-color: var(--success);
+}
+
+.reports-panel-empty {
+  border: 1px dashed var(--border-strong);
+  border-radius: 18px;
+  padding: 16px 18px;
+  background: var(--panel-surface-inset);
+  color: var(--text-muted);
+  font-size: 14px;
+  line-height: 1.6;
 }
 
 .reports-table-panel {
@@ -353,6 +446,61 @@
 .reports-table-shell > * {
   position: relative;
   z-index: 1;
+}
+
+.reports-managerial-grid {
+  margin-bottom: 14px;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.reports-managerial-card {
+  border-radius: 18px;
+  border: 1px solid var(--border-strong);
+  background: var(--panel-surface-inset);
+  padding: 16px 18px;
+  box-shadow: var(--surface-shadow-inset);
+}
+
+.reports-managerial-card span {
+  display: block;
+  margin-bottom: 8px;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.reports-managerial-card strong {
+  display: block;
+  color: var(--text-strong);
+  font-size: 22px;
+  line-height: 1.1;
+  letter-spacing: -0.02em;
+}
+
+.reports-managerial-card p {
+  margin: 8px 0 0;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.reports-managerial-card.is-positive {
+  border-color: var(--success-border);
+  background: linear-gradient(180deg, var(--success-soft) 0%, var(--panel-surface-inset) 100%);
+}
+
+.reports-managerial-card.is-negative {
+  border-color: var(--danger-border);
+  background: linear-gradient(180deg, var(--danger-soft) 0%, var(--panel-surface-inset) 100%);
+}
+
+.reports-managerial-card.is-neutral {
+  border-color: var(--border-strong);
+  background: var(--panel-surface-inset);
 }
 
 .reports-table-overview {
@@ -548,6 +696,10 @@
   .expenses-submit {
     grid-column: 1 / -1;
   }
+
+  .reports-managerial-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 @media (max-width: 920px) {
@@ -589,6 +741,10 @@
   .reports-overview-card:not(:last-child) {
     border-right: none;
     border-bottom: 1px solid var(--border-strong);
+  }
+
+  .reports-managerial-grid {
+    grid-template-columns: 1fr;
   }
 }
 
@@ -697,6 +853,11 @@
   .expenses-panel,
   .reports-table-panel {
     padding: 20px;
+  }
+
+  .expenses-input-block,
+  .expenses-impact-panel {
+    padding: 14px;
   }
 
   .expenses-summary-card strong {

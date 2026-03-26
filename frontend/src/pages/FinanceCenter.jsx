@@ -47,6 +47,142 @@ function parseRecurringAmount(value) {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
+function toSafeNumber(value) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function buildActionableInsights(payload, invoicePayload) {
+  if (!payload) {
+    return [];
+  }
+
+  const insights = [];
+  const netProfit = toSafeNumber(payload.summary?.netProfit);
+  const recurringTotal = payload.recurringExpenses.reduce(
+    (sum, expense) => sum + toSafeNumber(expense.amount),
+    0
+  );
+  const receivablesTotal = payload.receivables.reduce(
+    (sum, receivable) => sum + toSafeNumber(receivable.amount),
+    0
+  );
+  const pendingInvoices = toSafeNumber(invoicePayload?.meta?.pendingCount);
+  const hasInvoiceHistory = toSafeNumber(invoicePayload?.meta?.total) > 0;
+  const channelsByFeePercent = [...payload.feesByChannel].sort(
+    (left, right) => toSafeNumber(right.feePercent) - toSafeNumber(left.feePercent)
+  );
+  const channelsByMargin = [...payload.feesByChannel].sort(
+    (left, right) =>
+      toSafeNumber(left.netMarginPercent) - toSafeNumber(right.netMarginPercent)
+  );
+  const highestFeeChannel = channelsByFeePercent[0];
+  const lowestMarginChannel = channelsByMargin[0];
+
+  if (netProfit <= 0) {
+    insights.push({
+      id: "net-profit-pressure",
+      tone: "critical",
+      title: "Rentabilidade comprometida",
+      description:
+        "Lucro liquido zerado ou negativo no periodo. Priorize corte de custos fixos e revisao de preco nos canais com menor margem.",
+    });
+  } else if (recurringTotal > 0) {
+    const recurringShare = recurringTotal / netProfit;
+
+    if (recurringShare >= 0.4) {
+      insights.push({
+        id: "recurring-pressure",
+        tone: "warning",
+        title: "Despesas recorrentes pressionam margem",
+        description: `${formatPercent(
+          recurringShare
+        )} do lucro liquido ja esta comprometido com custos fixos. Renegocie contratos de maior impacto nesta semana.`,
+      });
+    } else if (recurringShare >= 0.2) {
+      insights.push({
+        id: "recurring-monitor",
+        tone: "info",
+        title: "Custos fixos pedem acompanhamento",
+        description: `Despesas recorrentes consomem ${formatPercent(
+          recurringShare
+        )} do lucro liquido. Mantenha revisao mensal para preservar margem.`,
+      });
+    }
+  }
+
+  if (pendingInvoices > 0) {
+    insights.push({
+      id: "invoice-pending",
+      tone: "warning",
+      title: "Pendencias fiscais no periodo",
+      description: `${pendingInvoices} NFe(s) ainda nao foram puxadas. Atualize agora para liberar XML/PDF antes do fechamento contabil.`,
+    });
+  } else if (hasInvoiceHistory) {
+    insights.push({
+      id: "invoice-ok",
+      tone: "success",
+      title: "Documentacao fiscal em dia",
+      description:
+        "NFes do periodo estao sincronizadas. Mantenha a rotina de conferencia para evitar pendencias de ultima hora.",
+    });
+  }
+
+  if (receivablesTotal > 0) {
+    insights.push({
+      id: "receivables-cash",
+      tone: "info",
+      title: "Repasses ajudam o caixa de curto prazo",
+      description: `${formatCurrency(
+        receivablesTotal
+      )} estao previstos para receber. Programe pagamentos fixos nas mesmas datas para reduzir pressao de caixa.`,
+    });
+  } else {
+    insights.push({
+      id: "receivables-empty",
+      tone: "neutral",
+      title: "Sem repasses previstos no recorte",
+      description:
+        "Amplie o periodo ou sincronize vendas para melhorar previsibilidade de caixa e evitar decisoes no escuro.",
+    });
+  }
+
+  if (lowestMarginChannel && toSafeNumber(lowestMarginChannel.netMarginPercent) <= 0.12) {
+    insights.push({
+      id: "channel-margin-alert",
+      tone: "warning",
+      title: "Canal com margem apertada",
+      description: `${lowestMarginChannel.channel} opera com margem liquida de ${formatPercent(
+        lowestMarginChannel.netMarginPercent
+      )}. Revise preco e custo antes de escalar investimento nesse canal.`,
+    });
+  } else if (
+    highestFeeChannel &&
+    toSafeNumber(highestFeeChannel.feePercent) >= 0.15
+  ) {
+    insights.push({
+      id: "channel-fee-alert",
+      tone: "info",
+      title: "Concentracao de taxa por canal",
+      description: `${highestFeeChannel.channel} concentra taxa de ${formatPercent(
+        highestFeeChannel.feePercent
+      )} sobre a receita. Monitore repasse e frete para proteger margem liquida.`,
+    });
+  }
+
+  if (!insights.length) {
+    insights.push({
+      id: "insufficient-data",
+      tone: "neutral",
+      title: "Base financeira em formacao",
+      description:
+        "Sincronize pedidos e despesas para gerar leituras acionaveis de margem, repasses e custo por canal.",
+    });
+  }
+
+  return insights.slice(0, 4);
+}
+
 function FinanceCenter() {
   const { selectedPeriod, setSelectedPeriod } = useAnalyticsPeriod();
   const [payload, setPayload] = useState(null);
@@ -313,13 +449,26 @@ function FinanceCenter() {
   const shouldScrollReceivables = payload.receivables.length > 6;
   const shouldScrollInvoices = (invoicePayload?.items?.length || 0) > 6;
   const shouldScrollRecurringExpenses = payload.recurringExpenses.length > 6;
+  const actionableInsights = buildActionableInsights(payload, invoicePayload);
+  const channelsByFeePercent = [...payload.feesByChannel].sort(
+    (left, right) => toSafeNumber(right.feePercent) - toSafeNumber(left.feePercent)
+  );
+  const channelsByMargin = [...payload.feesByChannel].sort(
+    (left, right) =>
+      toSafeNumber(left.netMarginPercent) - toSafeNumber(right.netMarginPercent)
+  );
+  const highestFeeChannel = channelsByFeePercent[0] || null;
+  const lowestMarginChannel = channelsByMargin[0] || null;
+  const priorityChannelIds = new Set(
+    [highestFeeChannel?.id, lowestMarginChannel?.id].filter(Boolean)
+  );
 
   const receivablesSection = (
     <section className="panel finance-receivables-panel">
       <div className="finance-panel-header">
         <div>
           <h2>Repasses a receber</h2>
-          <p>Movimentos esperados para aliviar o caixa de curto prazo.</p>
+          <p>Projecoes de entrada para sustentar o caixa de curto prazo.</p>
         </div>
       </div>
 
@@ -328,18 +477,25 @@ function FinanceCenter() {
           shouldScrollReceivables ? "is-scrollable scroll-region-medium" : ""
         }`}
       >
-        {payload.receivables.map((item) => (
-          <div key={item.id} className="finance-list-item finance-receivable-card">
-            <div>
-              <strong>{item.marketplace}</strong>
-              <p>{formatDate(item.expectedAt)}</p>
+        {payload.receivables.length ? (
+          payload.receivables.map((item) => (
+            <div key={item.id} className="finance-list-item finance-receivable-card">
+              <div>
+                <strong>{item.marketplace}</strong>
+                <p>{formatDate(item.expectedAt)}</p>
+              </div>
+              <div className="finance-list-values">
+                <span>{item.status}</span>
+                <strong>{formatCurrency(item.amount)}</strong>
+              </div>
             </div>
-            <div className="finance-list-values">
-              <span>{item.status}</span>
-              <strong>{formatCurrency(item.amount)}</strong>
-            </div>
+          ))
+        ) : (
+          <div className="finance-empty-state">
+            <strong>Nenhum repasse previsto no periodo.</strong>
+            <p>Amplie o recorte ou sincronize pedidos para projetar melhor seu caixa.</p>
           </div>
-        ))}
+        )}
       </div>
     </section>
   );
@@ -350,8 +506,8 @@ function FinanceCenter() {
         <div>
           <h2>NFes Mercado Livre</h2>
           <p>
-            Acompanhe NFes sincronizadas do canal Mercado Livre e mantenha os
-            documentos fiscais da operacao organizados.
+            Garanta XML e PDF disponiveis para fechamento contabil, suporte ao cliente
+            e rotina fiscal sem retrabalho.
           </p>
         </div>
 
@@ -362,7 +518,7 @@ function FinanceCenter() {
             onClick={handlePullPendingInvoices}
             disabled={pullingAllInvoices || !invoicePayload?.meta?.pendingCount}
           >
-            {pullingAllInvoices ? "Puxando NFes..." : "Puxar NFes nao baixadas"}
+            {pullingAllInvoices ? "Atualizando NFes..." : "Atualizar NFes pendentes"}
           </button>
         </div>
       </div>
@@ -375,30 +531,37 @@ function FinanceCenter() {
 
       <div className="finance-invoices-summary-grid">
         <article className="finance-invoice-summary-card">
-          <span>NFes no periodo</span>
+          <span>Documentos no periodo</span>
           <strong>{invoicePayload?.meta?.total ?? 0}</strong>
         </article>
         <article className="finance-invoice-summary-card">
-          <span>XMLs disponiveis</span>
+          <span>XML pronto para fechamento</span>
           <strong>{invoicePayload?.meta?.xmlDownloadedCount ?? 0}</strong>
         </article>
         <article className="finance-invoice-summary-card">
-          <span>PDFs disponiveis</span>
+          <span>PDF pronto para consulta</span>
           <strong>{invoicePayload?.meta?.pdfDownloadedCount ?? 0}</strong>
         </article>
         <article className="finance-invoice-summary-card">
-          <span>Nao baixadas</span>
+          <span>Pendentes de pull</span>
           <strong>{invoicePayload?.meta?.pendingCount ?? 0}</strong>
         </article>
       </div>
 
       <div className="finance-invoice-sync-note">
-        <span>Ultimo pull</span>
-        <strong>
-          {invoicePayload?.meta?.lastPullAt
-            ? formatDateTime(invoicePayload.meta.lastPullAt)
-            : "--"}
-        </strong>
+        <div>
+          <span>Ultima atualizacao fiscal</span>
+          <strong>
+            {invoicePayload?.meta?.lastPullAt
+              ? formatDateTime(invoicePayload.meta.lastPullAt)
+              : "--"}
+          </strong>
+        </div>
+        <p>
+          {(invoicePayload?.meta?.pendingCount || 0) > 0
+            ? `${invoicePayload.meta.pendingCount} pendencia(s) ativa(s). Execute o pull para regularizar os documentos.`
+            : "Sem pendencias abertas no momento para o periodo selecionado."}
+        </p>
       </div>
 
       <div
@@ -430,22 +593,22 @@ function FinanceCenter() {
 
                 <div className="finance-invoice-documents">
                   <div className="finance-invoice-document">
-                    <span>XML oficial</span>
+                    <span>XML para contabil</span>
                     <strong>{invoice.xmlStatusLabel}</strong>
                     <small>
                       {invoice.downloadedXmlAt
-                        ? `Baixado em ${formatDateTime(invoice.downloadedXmlAt)}`
-                        : "Ainda nao baixado"}
+                        ? `Disponivel desde ${formatDateTime(invoice.downloadedXmlAt)}`
+                        : "Puxe esta NFe para liberar o XML do fechamento."}
                     </small>
                   </div>
 
                   <div className="finance-invoice-document">
-                    <span>PDF / DANFE</span>
+                    <span>PDF para conferencia</span>
                     <strong>{invoice.pdfStatusLabel}</strong>
                     <small>
                       {invoice.downloadedPdfAt
-                        ? `Disponivel em ${formatDateTime(invoice.downloadedPdfAt)}`
-                        : "Sera gerado quando o documento for puxado"}
+                        ? `Disponivel desde ${formatDateTime(invoice.downloadedPdfAt)}`
+                        : "Gere no pull para consulta rapida e atendimento."}
                     </small>
                   </div>
                 </div>
@@ -454,13 +617,13 @@ function FinanceCenter() {
               <div className="finance-invoice-actions">
                 <div className="finance-invoice-file-group">
                   <span className="finance-invoice-file">
-                    XML: {invoice.xmlUrl || "pendente"}
+                    XML no storage: {invoice.xmlUrl || "pendente"}
                   </span>
                   <span className="finance-invoice-file">
-                    PDF: {invoice.pdfUrl || "pendente"}
+                    PDF no storage: {invoice.pdfUrl || "pendente"}
                   </span>
                   <span className="finance-invoice-file">
-                    Storage: {invoice.storagePath}
+                    Referencia interna: {invoice.storagePath}
                   </span>
                 </div>
 
@@ -524,7 +687,11 @@ function FinanceCenter() {
           ))
         ) : (
           <div className="finance-empty-state">
-            Nenhuma NFe do Mercado Livre encontrada para o recorte atual.
+            <strong>Nenhuma NFe do Mercado Livre neste recorte.</strong>
+            <p>
+              Revise o periodo selecionado ou atualize NFes pendentes para manter os
+              documentos fiscais prontos para operacao.
+            </p>
           </div>
         )}
       </div>
@@ -590,34 +757,51 @@ function FinanceCenter() {
           <div className="finance-panel-header">
             <div>
               <h2>Fluxo de caixa</h2>
-              <p>Entradas, saidas e saldo por janela operacional.</p>
+              <p>Entradas e saidas para decidir corte de custos e ritmo de investimento.</p>
             </div>
           </div>
 
           <div className="finance-cashflow-list">
-            {payload.cashFlow.map((row) => (
-              <article key={row.id} className="finance-cashflow-item">
-                <div>
-                  <strong>{row.label}</strong>
-                  <p>Entradas {formatCurrency(row.inflow)}</p>
-                </div>
-                <div className="finance-cashflow-values">
-                  <span>Saidas {formatCurrency(row.outflow)}</span>
-                  <strong className={row.net >= 0 ? "is-positive" : "is-negative"}>
-                    {formatCurrency(row.net)}
-                  </strong>
-                </div>
-              </article>
-            ))}
+            {payload.cashFlow.length ? (
+              payload.cashFlow.map((row) => (
+                <article key={row.id} className="finance-cashflow-item">
+                  <div>
+                    <strong>{row.label}</strong>
+                    <p>Entradas {formatCurrency(row.inflow)}</p>
+                  </div>
+                  <div className="finance-cashflow-values">
+                    <span>Saidas {formatCurrency(row.outflow)}</span>
+                    <strong className={row.net >= 0 ? "is-positive" : "is-negative"}>
+                      {formatCurrency(row.net)}
+                    </strong>
+                  </div>
+                </article>
+              ))
+            ) : (
+              <div className="finance-empty-state">
+                <strong>Sem movimentacao de caixa no periodo.</strong>
+                <p>
+                  Sincronize pedidos e despesas ou amplie a janela para liberar leitura
+                  financeira acionavel.
+                </p>
+              </div>
+            )}
           </div>
 
           <div className="finance-bridge-grid">
-            {payload.netProfitBridge.map((item) => (
-              <article key={item.id} className={`finance-bridge-card is-${item.tone}`}>
-                <span>{item.label}</span>
-                <strong>{formatCurrency(item.amount)}</strong>
-              </article>
-            ))}
+            {payload.netProfitBridge.length ? (
+              payload.netProfitBridge.map((item) => (
+                <article key={item.id} className={`finance-bridge-card is-${item.tone}`}>
+                  <span>{item.label}</span>
+                  <strong>{formatCurrency(item.amount)}</strong>
+                </article>
+              ))
+            ) : (
+              <div className="finance-empty-state">
+                <strong>Sem composicao de lucro para exibir.</strong>
+                <p>Quando houver base de receita e custo, esta visao destaca os principais impactos.</p>
+              </div>
+            )}
           </div>
         </section>
 
@@ -626,7 +810,7 @@ function FinanceCenter() {
             <div className="finance-panel-header">
               <div>
                 <h2>Despesas recorrentes</h2>
-                <p>Custos fixos que pressionam o lucro do periodo.</p>
+                <p>Custos fixos que pedem revisao para proteger margem liquida.</p>
               </div>
             </div>
 
@@ -722,7 +906,11 @@ function FinanceCenter() {
                 ))
               ) : (
                 <div className="finance-empty-state">
-                  Nenhuma despesa recorrente cadastrada ainda.
+                  <strong>Nenhuma despesa recorrente cadastrada.</strong>
+                  <p>
+                    Cadastre custos fixos principais para acompanhar impacto no lucro e
+                    evitar surpresas no fechamento.
+                  </p>
                 </div>
               )}
             </div>
@@ -738,40 +926,99 @@ function FinanceCenter() {
           <div className="finance-panel-header">
             <div>
               <h2>Taxa por canal</h2>
-              <p>Compare custo de marketplace com margem liquida por canal.</p>
+              <p>Use esta leitura para decidir onde preservar margem antes de escalar.</p>
             </div>
           </div>
 
-          <div className="finance-channel-list">
-            {payload.feesByChannel.map((channel) => (
-              <article key={channel.id} className="finance-channel-card">
-                <strong>{channel.channel}</strong>
-                <span>Taxas {formatCurrency(channel.feeAmount)}</span>
-                <p>{formatPercent(channel.feePercent)} sobre a receita</p>
-                <div className="finance-channel-footnote">
-                  <span>Margem liquida</span>
-                  <strong>{formatPercent(channel.netMarginPercent)}</strong>
-                </div>
-              </article>
-            ))}
-          </div>
+          {payload.feesByChannel.length ? (
+            <>
+              <div className="finance-channel-priority-grid">
+                <article className="finance-channel-priority-card">
+                  <span>Maior taxa no periodo</span>
+                  <strong>{highestFeeChannel?.channel || "--"}</strong>
+                  <p>
+                    {highestFeeChannel
+                      ? `${formatPercent(
+                          highestFeeChannel.feePercent
+                        )} da receita desse canal virou taxa.`
+                      : "Sem base suficiente para comparar taxa por canal."}
+                  </p>
+                </article>
+
+                <article className="finance-channel-priority-card is-warning">
+                  <span>Menor margem liquida</span>
+                  <strong>{lowestMarginChannel?.channel || "--"}</strong>
+                  <p>
+                    {lowestMarginChannel
+                      ? `${formatPercent(
+                          lowestMarginChannel.netMarginPercent
+                        )} de margem. Revise preco e custo antes de aumentar investimento.`
+                      : "Sem base suficiente para comparar margem por canal."}
+                  </p>
+                </article>
+              </div>
+
+              <div className="finance-channel-list">
+                {payload.feesByChannel.map((channel) => (
+                  <article
+                    key={channel.id}
+                    className={`finance-channel-card ${
+                      priorityChannelIds.has(channel.id) ? "is-priority" : ""
+                    }`}
+                  >
+                    <strong>{channel.channel}</strong>
+                    <span>Taxas {formatCurrency(channel.feeAmount)}</span>
+                    <p>{formatPercent(channel.feePercent)} sobre a receita</p>
+                    <div className="finance-channel-footnote">
+                      <span>Margem liquida</span>
+                      <strong>{formatPercent(channel.netMarginPercent)}</strong>
+                    </div>
+                  </article>
+                ))}
+              </div>
+            </>
+          ) : (
+            <div className="finance-empty-state">
+              <strong>Taxa por canal sem dados suficientes.</strong>
+              <p>
+                Sincronize pedidos do periodo ou amplie o recorte para comparar custo
+                de marketplace e margem liquida com seguranca.
+              </p>
+            </div>
+          )}
         </section>
 
         <section className="panel finance-insights-panel">
           <div className="finance-panel-header">
             <div>
               <h2>Leituras para agir</h2>
-              <p>Resumo em linguagem direta do que merece atencao financeira.</p>
+              <p>Prioridades praticas para agir hoje e proteger resultado financeiro.</p>
             </div>
           </div>
 
           <div className="finance-insight-list">
-            {payload.insights.map((insight, index) => (
-              <div key={`${insight}-${index}`} className="finance-insight-item">
-                <div className="finance-insight-dot" />
-                <p>{insight}</p>
+            {actionableInsights.length ? (
+              actionableInsights.map((insight) => (
+                <div
+                  key={insight.id}
+                  className={`finance-insight-item is-${insight.tone}`}
+                >
+                  <div className={`finance-insight-dot is-${insight.tone}`} />
+                  <div>
+                    <strong>{insight.title}</strong>
+                    <p>{insight.description}</p>
+                  </div>
+                </div>
+              ))
+            ) : (
+              <div className="finance-empty-state">
+                <strong>Sem leitura acionavel no momento.</strong>
+                <p>
+                  Mantenha pedidos, despesas e repasses sincronizados para liberar
+                  orientacoes praticas desta secao.
+                </p>
               </div>
-            ))}
+            )}
           </div>
         </section>
       </div>

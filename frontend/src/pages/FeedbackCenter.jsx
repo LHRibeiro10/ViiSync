@@ -18,6 +18,57 @@ const initialForm = {
   message: "",
 };
 
+const FEEDBACK_TYPE_UI = {
+  complaint: {
+    tone: "danger",
+    subtitle: "Reclamacao",
+    spotlightTitle: "Relato de reclamacao",
+    spotlightDescription:
+      "Descreva impacto operacional, recorrencia e o que precisa ser corrigido primeiro.",
+  },
+  bug: {
+    tone: "warning",
+    subtitle: "Falha tecnica",
+    spotlightTitle: "Relato de bug",
+    spotlightDescription:
+      "Informe passo a passo do erro para acelerar reproducao e correcoes do time.",
+  },
+  feature: {
+    tone: "accent",
+    subtitle: "Sugestao de melhoria",
+    spotlightTitle: "Sugestao de funcionalidade",
+    spotlightDescription:
+      "Explique o ganho esperado para sua operacao e como essa melhoria ajuda no dia a dia.",
+  },
+  feedback: {
+    tone: "neutral",
+    subtitle: "Percepcao geral",
+    spotlightTitle: "Feedback de experiencia",
+    spotlightDescription:
+      "Compartilhe percepcao de uso para orientar ajustes de experiencia e clareza do produto.",
+  },
+};
+
+function getFeedbackTypeUi(type) {
+  return FEEDBACK_TYPE_UI[type] || FEEDBACK_TYPE_UI.feedback;
+}
+
+function getHistoryFollowUpCopy(item) {
+  if (item.statusTone === "success") {
+    return "Item resolvido. Use este historico como referencia para novos envios.";
+  }
+
+  if (item.statusTone === "warning") {
+    return "Em analise pelo time. Aguarde retorno oficial neste mesmo painel.";
+  }
+
+  if (item.statusTone === "danger") {
+    return "Recebido e aguardando triagem inicial. Manteremos atualizacao por aqui.";
+  }
+
+  return "Envio registrado. Acompanhe o status para novas orientacoes operacionais.";
+}
+
 function FeedbackCenter({ embedded = false }) {
   const location = useLocation();
   const [payload, setPayload] = useState(null);
@@ -86,6 +137,9 @@ function FeedbackCenter({ embedded = false }) {
     ];
   }, [payload]);
   const shouldScrollFeedbackHistory = (payload?.items?.length || 0) > 6;
+  const activeTypeUi = getFeedbackTypeUi(form.type);
+  const latestFeedbackItem = payload?.items?.[0] || null;
+  const pendingCount = (payload?.meta?.openCount || 0) + (payload?.meta?.inReviewCount || 0);
 
   function handleFormChange(field, value) {
     setForm((currentValue) => ({
@@ -155,56 +209,82 @@ function FeedbackCenter({ embedded = false }) {
           <div className="feedback-panel-header">
             <div>
               <h2>Novo envio</h2>
-              <p>Descreva o contexto e o impacto para facilitar a triagem do time.</p>
+              <p>
+                Canal oficial com o time ViiSync para registrar bug, reclamacao,
+                sugestao e feedback com rastreabilidade.
+              </p>
             </div>
           </div>
 
           <div className="feedback-type-chips">
-            {feedbackTypeOptions.map((option) => (
-              <button
-                key={option.value}
-                type="button"
-                className={form.type === option.value ? "is-active" : ""}
-                onClick={() => handleFormChange("type", option.value)}
-              >
-                {option.label}
-              </button>
-            ))}
+            {feedbackTypeOptions.map((option) => {
+              const typeUi = getFeedbackTypeUi(option.value);
+              const isActive = form.type === option.value;
+
+              return (
+                <button
+                  key={option.value}
+                  type="button"
+                  className={`feedback-type-chip is-${typeUi.tone} ${isActive ? "is-active" : ""}`}
+                  onClick={() => handleFormChange("type", option.value)}
+                >
+                  <span>{option.label}</span>
+                  <small>{typeUi.subtitle}</small>
+                </button>
+              );
+            })}
+          </div>
+
+          <div className={`feedback-type-spotlight is-${activeTypeUi.tone}`}>
+            <strong>{activeTypeUi.spotlightTitle}</strong>
+            <p>{activeTypeUi.spotlightDescription}</p>
           </div>
 
           <form className="feedback-form" onSubmit={handleSubmit}>
-            <label className="feedback-field">
-              <span>Area</span>
-              <select
-                value={form.area}
-                onChange={(event) => handleFormChange("area", event.target.value)}
-              >
-                {feedbackAreaOptions.map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
-            </label>
+            <div className="feedback-form-section">
+              <h3>Classificacao e contexto</h3>
+              <p>Defina area e assunto para facilitar a triagem e acelerar retorno.</p>
 
-            <label className="feedback-field">
-              <span>Assunto</span>
-              <input
-                type="text"
-                value={form.subject}
-                onChange={(event) => handleFormChange("subject", event.target.value)}
-                placeholder="Resumo curto do que aconteceu ou do que voce deseja"
-              />
-            </label>
+              <div className="feedback-form-compact-grid">
+                <label className="feedback-field">
+                  <span>Area</span>
+                  <select
+                    value={form.area}
+                    onChange={(event) => handleFormChange("area", event.target.value)}
+                  >
+                    {feedbackAreaOptions.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
 
-            <label className="feedback-field">
-              <span>Descricao</span>
-              <textarea
-                value={form.message}
-                onChange={(event) => handleFormChange("message", event.target.value)}
-                placeholder="Explique o problema, o impacto e o resultado esperado."
-              />
-            </label>
+                <label className="feedback-field">
+                  <span>Assunto</span>
+                  <input
+                    type="text"
+                    value={form.subject}
+                    onChange={(event) => handleFormChange("subject", event.target.value)}
+                    placeholder="Resumo curto do que aconteceu ou do que voce deseja"
+                  />
+                </label>
+              </div>
+            </div>
+
+            <div className="feedback-form-section">
+              <h3>Descricao do envio</h3>
+              <p>Contextualize situacao, impacto e resultado esperado de forma objetiva.</p>
+
+              <label className="feedback-field">
+                <span>Descricao</span>
+                <textarea
+                  value={form.message}
+                  onChange={(event) => handleFormChange("message", event.target.value)}
+                  placeholder="Explique o problema, o impacto e o resultado esperado."
+                />
+              </label>
+            </div>
 
             {feedbackMessage ? (
               <div className={`feedback-inline-alert is-${feedbackMessage.tone}`}>
@@ -238,8 +318,28 @@ function FeedbackCenter({ embedded = false }) {
             <div className="feedback-panel-header">
               <div>
                 <h2>Historico recente</h2>
-                <p>Aqui aparecem os envios da sua operacao e o status atual de cada item.</p>
+                <p>Acompanhe retorno oficial do time e o andamento de cada envio.</p>
               </div>
+            </div>
+
+            <div className="feedback-history-priority">
+              <div>
+                <strong>
+                  {pendingCount
+                    ? `${pendingCount} envio(s) aguardando andamento`
+                    : "Sem pendencias abertas no momento"}
+                </strong>
+                <p>
+                  {pendingCount
+                    ? "Priorize acompanhar itens em aberto para manter alinhamento com o time."
+                    : "Se precisar, registre novo envio para abrir comunicacao oficial com o time."}
+                </p>
+              </div>
+              <span>
+                {latestFeedbackItem
+                  ? `Ultimo envio ${formatFeedbackRelativeTime(latestFeedbackItem.createdAt)}`
+                  : "Nenhum envio recente"}
+              </span>
             </div>
 
             <div className="feedback-history-filters">
@@ -292,10 +392,18 @@ function FeedbackCenter({ embedded = false }) {
                   shouldScrollFeedbackHistory ? "is-scrollable scroll-region-medium" : ""
                 }`}
               >
-                {payload.items.map((item) => (
-                  <article key={item.id} className="feedback-history-card">
+                {payload.items.map((item, index) => (
+                  <article
+                    key={item.id}
+                    className={`feedback-history-card is-${item.statusTone} ${
+                      index === 0 ? "is-latest" : ""
+                    }`}
+                  >
                     <div className="feedback-history-topline">
                       <div className="feedback-badge-row">
+                        {index === 0 ? (
+                          <span className="feedback-latest-chip">Mais recente</span>
+                        ) : null}
                         <span className={`feedback-badge is-${item.priorityTone}`}>
                           {item.priorityLabel}
                         </span>
@@ -315,9 +423,14 @@ function FeedbackCenter({ embedded = false }) {
                       <span>{formatFeedbackDateTime(item.createdAt)}</span>
                     </div>
 
+                    <div className="feedback-history-followup">
+                      <strong>Proximo acompanhamento</strong>
+                      <p>{getHistoryFollowUpCopy(item)}</p>
+                    </div>
+
                     {item.adminResponse || item.resolutionEta ? (
                       <div className="feedback-admin-response">
-                        <strong>Retorno do time</strong>
+                        <strong>Atualizacao do time</strong>
                         {item.adminResponse ? <p>{item.adminResponse}</p> : null}
                         {item.resolutionEta ? (
                           <span>
@@ -332,7 +445,10 @@ function FeedbackCenter({ embedded = false }) {
             ) : (
               <div className="feedback-empty-state">
                 <strong>Nenhum envio ainda</strong>
-                <p>Os feedbacks e reclamacoes enviados por voce aparecerao aqui.</p>
+                <p>
+                  Seus proximos envios aparecerao neste historico com status,
+                  prioridade e retorno oficial do time.
+                </p>
               </div>
             )}
           </section>

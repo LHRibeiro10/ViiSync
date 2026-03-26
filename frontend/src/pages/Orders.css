@@ -145,6 +145,70 @@
   line-height: 1.2;
 }
 
+.orders-ops-strip {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 18px;
+}
+
+.orders-ops-card {
+  border: 1px solid var(--border-strong);
+  border-radius: 16px;
+  background: var(--panel-surface-inset);
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  box-shadow: var(--card-shadow-soft), var(--surface-shadow-inset);
+}
+
+.orders-ops-card span {
+  color: var(--text-soft);
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.orders-ops-card strong {
+  color: var(--text-strong);
+  font-size: 17px;
+  line-height: 1.35;
+}
+
+.orders-ops-card p {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.orders-ops-card.is-positive {
+  border-color: var(--success-border);
+  background: linear-gradient(165deg, var(--success-soft) 0%, var(--panel-surface) 84%);
+}
+
+.orders-ops-card.is-warning {
+  border-color: var(--warning-border);
+  background: linear-gradient(165deg, var(--warning-soft) 0%, var(--panel-surface) 84%);
+}
+
+.orders-ops-card.is-danger {
+  border-color: var(--danger-border);
+  background: linear-gradient(165deg, var(--danger-soft) 0%, var(--panel-surface) 84%);
+}
+
+.orders-ops-card.is-neutral {
+  border-color: var(--accent-soft-strong);
+  background: linear-gradient(165deg, var(--accent-soft) 0%, var(--panel-surface) 84%);
+}
+
+.orders-ops-card.is-placeholder {
+  border-style: dashed;
+  background: var(--panel-surface-inset);
+}
+
 .orders-results-meta {
   display: flex;
   align-items: baseline;
@@ -216,11 +280,103 @@
   background: var(--table-hover-bg);
 }
 
+.orders-status-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 6px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border-strong);
+  background: var(--surface-2);
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.orders-status-badge.is-warning {
+  border-color: var(--warning-border);
+  background: var(--warning-soft);
+  color: var(--warning);
+}
+
+.orders-status-badge.is-danger {
+  border-color: var(--danger-border);
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+.orders-status-badge.is-positive {
+  border-color: var(--success-border);
+  background: var(--success-soft);
+  color: var(--success);
+}
+
+.orders-status-badge.is-info {
+  border-color: var(--accent-soft-strong);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
 .orders-empty-state {
-  padding: 32px 20px;
-  text-align: center;
+  padding: 22px 20px;
+  border: 1px dashed var(--border-strong);
+  border-radius: 16px;
+  background: var(--panel-surface-inset);
   color: var(--text-muted);
-  font-weight: 700;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  align-items: flex-start;
+}
+
+.orders-empty-state strong {
+  color: var(--text-strong);
+  font-size: 16px;
+  line-height: 1.4;
+}
+
+.orders-empty-state p {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 14px;
+  line-height: 1.55;
+}
+
+.orders-empty-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.orders-empty-button {
+  min-height: 42px;
+  padding: 0 14px;
+  border-radius: 12px;
+  border: 1px solid var(--admin-button-border);
+  background: var(--admin-button-bg);
+  color: #ffffff;
+  font-weight: 800;
+  cursor: pointer;
+  box-shadow: var(--admin-button-shadow);
+}
+
+.orders-empty-button:hover {
+  transform: translateY(-1px);
+  background: var(--admin-button-bg-hover);
+  box-shadow: var(--admin-button-shadow-hover);
+}
+
+.orders-empty-button.is-secondary {
+  border-color: var(--border-strong);
+  background: var(--panel-surface-inset);
+  color: var(--text-strong);
+  box-shadow: var(--button-secondary-shadow);
+}
+
+.orders-empty-button.is-secondary:hover {
+  background: var(--accent-soft);
+  border-color: var(--accent-soft-strong);
+  color: var(--accent);
 }
 
 @media (max-width: 720px) {
@@ -229,6 +385,10 @@
   }
 
   .orders-summary-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .orders-ops-strip {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
@@ -243,6 +403,10 @@
   }
 
   .orders-summary-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .orders-ops-strip {
     grid-template-columns: 1fr;
   }
 
@@ -300,5 +464,14 @@
     font-weight: 800;
     letter-spacing: 0.08em;
     text-transform: uppercase;
+  }
+
+  .orders-empty-actions {
+    width: 100%;
+    flex-direction: column;
+  }
+
+  .orders-empty-button {
+    width: 100%;
   }
 }

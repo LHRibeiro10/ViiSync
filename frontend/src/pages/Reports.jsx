@@ -1247,70 +1247,93 @@ function AdditionalExpensesPanel({
       <div className="panel-header">
         <div>
           <h2>Gastos adicionais</h2>
-          <p>Registre despesas extras para ajustar o lucro total exibido e exportado.</p>
+          <p>
+            Registre custos extras para manter leitura executiva do lucro ajustado e
+            evitar distorcoes no fechamento.
+          </p>
         </div>
       </div>
 
       <div className="expenses-layout">
-        <form className="expenses-form" onSubmit={onSubmit}>
-          <label className="expenses-field">
-            <span>Descricao do gasto</span>
-            <input
-              type="text"
-              name="description"
-              value={expenseForm.description}
-              onChange={onFieldChange}
-              placeholder="Ex.: Frete extra, embalagem, taxa"
-            />
-          </label>
+        <div className="expenses-input-block">
+          <form className="expenses-form" onSubmit={onSubmit}>
+            <label className="expenses-field">
+              <span>Descricao do gasto</span>
+              <input
+                type="text"
+                name="description"
+                value={expenseForm.description}
+                onChange={onFieldChange}
+                placeholder="Ex.: Frete extra, embalagem, taxa"
+              />
+            </label>
 
-          <label className="expenses-field">
-            <span>Valor do gasto</span>
-            <input
-              type="text"
-              name="value"
-              inputMode="decimal"
-              value={expenseForm.value}
-              onChange={onFieldChange}
-              placeholder="0,00"
-            />
-          </label>
+            <label className="expenses-field">
+              <span>Valor do gasto</span>
+              <input
+                type="text"
+                name="value"
+                inputMode="decimal"
+                value={expenseForm.value}
+                onChange={onFieldChange}
+                placeholder="0,00"
+              />
+            </label>
 
-          <label className="expenses-field">
-            <span>Mes de referencia</span>
-            <input
-              type="month"
-              name="monthReference"
-              value={expenseForm.monthReference}
-              onChange={onFieldChange}
-            />
-          </label>
+            <label className="expenses-field">
+              <span>Mes de referencia</span>
+              <input
+                type="month"
+                name="monthReference"
+                value={expenseForm.monthReference}
+                onChange={onFieldChange}
+              />
+            </label>
 
-          <button type="submit" className="expenses-submit" disabled={savingExpense}>
-            {savingExpense ? "Salvando..." : "Adicionar gasto"}
-          </button>
-        </form>
+            <button type="submit" className="expenses-submit" disabled={savingExpense}>
+              {savingExpense ? "Salvando..." : "Adicionar gasto"}
+            </button>
+          </form>
 
-        {formError ? <p className="expenses-form-error">{formError}</p> : null}
+          {formError ? <p className="expenses-form-error">{formError}</p> : null}
+        </div>
 
-        <div className="expenses-summary">
-          <div className="expenses-summary-card">
-            <span>Lucro original</span>
-            <strong>{formatCurrency(originalProfit)}</strong>
-            <p>Valor enviado pelo relatorio base.</p>
+        <div className="expenses-impact-panel">
+          <div className="expenses-impact-header">
+            <h3>Impacto no resultado</h3>
+            <p>
+              Compare lucro original, custos extras e lucro ajustado para validar
+              qualidade do resultado no periodo.
+            </p>
           </div>
 
-          <div className="expenses-summary-card">
-            <span>Total de gastos adicionais</span>
-            <strong>{formatCurrency(totalAdditionalExpenses)}</strong>
-            <p>{expenses.length} gasto(s) cadastrado(s).</p>
-          </div>
+          <div className="expenses-summary">
+            <div className="expenses-summary-card is-neutral">
+              <span>Lucro original</span>
+              <strong>{formatCurrency(originalProfit)}</strong>
+              <p>Resultado enviado pelo relatorio base.</p>
+            </div>
 
-          <div className="expenses-summary-card">
-            <span>Lucro ajustado</span>
-            <strong>{formatCurrency(adjustedProfit)}</strong>
-            <p>Lucro total menos os gastos adicionais.</p>
+            <div className="expenses-summary-card is-warning">
+              <span>Gastos adicionais</span>
+              <strong>{formatCurrency(totalAdditionalExpenses)}</strong>
+              <p>{expenses.length} lancamento(s) afetando o fechamento.</p>
+            </div>
+
+            <div className={`expenses-summary-card is-${getValueTone(adjustedProfit)}`}>
+              <span>Lucro ajustado</span>
+              <strong>{formatCurrency(adjustedProfit)}</strong>
+              <p>Resultado final apos abatimento dos custos extras.</p>
+            </div>
           </div>
+        </div>
+
+        <div className="expenses-list-header">
+          <h3>Lancamentos registrados</h3>
+          <p>
+            Revise a lista antes de exportar para manter o relatorio financeiro
+            consistente com a operacao.
+          </p>
         </div>
 
         <div className="expenses-list">
@@ -1343,7 +1366,8 @@ function AdditionalExpensesPanel({
             ))
           ) : (
             <div className="expenses-empty">
-              Nenhum gasto adicional cadastrado ate o momento.
+              Nenhum gasto adicional no recorte atual. Cadastre custos extras para
+              refletir o lucro real da operacao no periodo.
             </div>
           )}
         </div>
@@ -1506,6 +1530,17 @@ function Reports() {
   const monthlyReportRows = buildMonthlyReportRows(Array.isArray(data.rows) ? data.rows : []);
   const monthlyReportSummary = calculateMonthlyReportSummary(monthlyReportRows);
   const selectedPeriodLabel = formatPeriodLabel(selectedPeriod);
+  const monthlyRowsByProfit = [...monthlyReportRows].sort(
+    (left, right) => right.profitValue - left.profitValue
+  );
+  const bestPeriodRow = monthlyRowsByProfit[0] || null;
+  const worstPeriodRow =
+    monthlyRowsByProfit.length > 1
+      ? monthlyRowsByProfit[monthlyRowsByProfit.length - 1]
+      : null;
+  const averageProfitPerPeriod = monthlyReportRows.length
+    ? monthlyReportSummary.profit / monthlyReportRows.length
+    : 0;
 
   async function handleExport() {
     if (!profitReportRows.length) {
@@ -1550,7 +1585,7 @@ function Reports() {
       <PageHeader
         tag="Analises"
         title="Relatorios"
-        description={`Acompanhe o desempenho consolidado das vendas, lucro e canais. O arquivo exportado respeita o recorte de ${selectedPeriodLabel}.`}
+        description={`Leitura executiva de vendas, lucro e margem por canal. A exportacao considera o recorte de ${selectedPeriodLabel}.`}
       >
         <div className="reports-header-actions">
           <div className="reports-period-switcher">
@@ -1639,49 +1674,71 @@ function Reports() {
       />
 
       <div className="panels">
-        <Panel
-          title="Desempenho por canal"
-          description={`Comparativo de receita e lucro por marketplace em ${selectedPeriodLabel.toLowerCase()}`}
-        >
-          {channelPerformance.map((channel) => (
-            <div key={channel.id} className="row">
-              <div className="row-main">
-                <strong>{channel.name}</strong>
-                <p>Canal ativo no relatorio</p>
+        <div className="reports-focus-panel is-channel">
+          <Panel
+            title="Desempenho por canal"
+            description={`Comparativo de receita e lucro por marketplace em ${selectedPeriodLabel.toLowerCase()}, com foco em decisao de alocacao.`}
+          >
+            {channelPerformance.length ? (
+              channelPerformance.map((channel, index) => (
+                <div key={channel.id} className="row reports-analytic-row">
+                  <div className="row-main">
+                    <strong>{channel.name}</strong>
+                    <p>
+                      {index === 0
+                        ? "Canal lider de faturamento no recorte atual."
+                        : "Canal ativo com contribuicao no resultado consolidado."}
+                    </p>
+                  </div>
+
+                  <div className="report-values">
+                    <span>Receita {channel.revenue}</span>
+                    <strong>{channel.profit}</strong>
+                  </div>
+                </div>
+              ))
+            ) : (
+              <div className="reports-panel-empty">
+                Sem dados por canal para este recorte. Amplie o periodo ou sincronize os
+                pedidos para liberar a leitura comparativa.
               </div>
+            )}
+          </Panel>
+        </div>
 
-              <div className="report-values">
-                <span>{channel.revenue}</span>
-                <strong>{channel.profit}</strong>
+        <div className="reports-focus-panel is-products">
+          <Panel
+            title="Produtos mais lucrativos"
+            description={`Itens com maior contribuicao de lucro em ${selectedPeriodLabel.toLowerCase()}, priorizando a visao de rentabilidade.`}
+          >
+            {topProductsByProfit.length ? (
+              topProductsByProfit.map((product, index) => (
+                <div key={product.id} className="row reports-analytic-row">
+                  <div className="rank">{index + 1}</div>
+
+                  <div className="row-main">
+                    <strong>{product.name}</strong>
+                    <p>{index === 0 ? "Maior lucro do recorte analisado." : "Produto com resultado positivo relevante."}</p>
+                  </div>
+
+                  <span className="row-value">{product.profit}</span>
+                </div>
+              ))
+            ) : (
+              <div className="reports-panel-empty">
+                Sem produtos lucrativos consolidados no periodo atual. Revise filtros ou
+                aguarde nova sincronizacao para comparar itens.
               </div>
-            </div>
-          ))}
-        </Panel>
-
-        <Panel
-          title="Produtos mais lucrativos"
-          description={`Itens com melhor resultado em ${selectedPeriodLabel.toLowerCase()}`}
-        >
-          {topProductsByProfit.map((product, index) => (
-            <div key={product.id} className="row">
-              <div className="rank">{index + 1}</div>
-
-              <div className="row-main">
-                <strong>{product.name}</strong>
-                <p>Maior lucro</p>
-              </div>
-
-              <span className="row-value">{product.profit}</span>
-            </div>
-          ))}
-        </Panel>
+            )}
+          </Panel>
+        </div>
       </div>
 
       <div className="panel reports-table-panel">
         <div className="panel-header reports-table-panel-header">
           <div>
             <h2>Resumo por periodo</h2>
-            <p>Visao consolidada por mes com destaque para faturamento, lucro e margem.</p>
+            <p>Leitura gerencial por periodo para identificar picos, quedas e tendencia de margem.</p>
           </div>
 
           <div className="reports-table-highlights">
@@ -1696,6 +1753,64 @@ function Reports() {
               Margem consolidada {formatPercentage(monthlyReportSummary.marginValue)}
             </span>
           </div>
+        </div>
+
+        <div className="reports-managerial-grid">
+          <article className="reports-managerial-card is-positive">
+            <span>Melhor periodo</span>
+            <strong>{bestPeriodRow ? bestPeriodRow.period : "--"}</strong>
+            <p>
+              {bestPeriodRow
+                ? `Lucro ${bestPeriodRow.profit} com margem de ${formatPercentage(
+                    bestPeriodRow.marginValue
+                  )}.`
+                : "Sem base de periodos para identificar melhor desempenho."}
+            </p>
+          </article>
+
+          <article className="reports-managerial-card is-negative">
+            <span>Pior periodo</span>
+            <strong>{worstPeriodRow ? worstPeriodRow.period : "--"}</strong>
+            <p>
+              {worstPeriodRow
+                ? `Lucro ${worstPeriodRow.profit} com margem de ${formatPercentage(
+                    worstPeriodRow.marginValue
+                  )}.`
+                : monthlyReportRows.length === 1
+                  ? "Aguardando mais de um periodo para comparar melhor e pior resultado."
+                  : "Sem base de periodos para leitura de risco."}
+            </p>
+          </article>
+
+          <article className="reports-managerial-card is-neutral">
+            <span>Lucro medio</span>
+            <strong>
+              {monthlyReportRows.length ? formatCurrency(averageProfitPerPeriod) : "--"}
+            </strong>
+            <p>
+              {monthlyReportRows.length
+                ? `${formatInteger(monthlyReportRows.length)} periodo(s) analisado(s) no recorte.`
+                : "Sem periodos consolidados para calcular media de lucro."}
+            </p>
+          </article>
+
+          <article
+            className={`reports-managerial-card is-${getValueTone(
+              monthlyReportSummary.marginValue
+            )}`}
+          >
+            <span>Margem consolidada</span>
+            <strong>
+              {monthlyReportRows.length
+                ? formatPercentage(monthlyReportSummary.marginValue)
+                : "--"}
+            </strong>
+            <p>
+              {monthlyReportRows.length
+                ? "Indicador geral de eficiencia do periodo consolidado."
+                : "Sincronize dados para liberar leitura consolidada de margem."}
+            </p>
+          </article>
         </div>
 
         <div className="reports-table-shell">
@@ -1838,7 +1953,10 @@ function Reports() {
                   </>
                 ) : (
                   <tr className="reports-table-empty-row">
-                    <td colSpan={5}>Nenhum periodo consolidado disponivel.</td>
+                    <td colSpan={5}>
+                      Nenhum periodo consolidado disponivel. Ajuste o recorte ou atualize os
+                      dados para habilitar a leitura gerencial.
+                    </td>
                   </tr>
                 )}
               </tbody>
