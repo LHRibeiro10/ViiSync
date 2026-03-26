@@ -83,6 +83,7 @@ function Dashboard() {
   const navigate = useNavigate();
   const { selectedPeriod, setSelectedPeriod } = useAnalyticsPeriod();
   const hasMercadoLivreConnected = Boolean(mercadoLivreStatus?.usingLive);
+  const isMarketplaceSyncing = mercadoLivreStatus?.sync?.status === "syncing";
 
   function showIntegrationFeedback(message, tone = "success") {
     setIntegrationFeedback({
@@ -452,10 +453,14 @@ function Dashboard() {
 
         <button
           onClick={hasMercadoLivreConnected ? handleSync : handleConnectMercadoLivre}
-          disabled={hasMercadoLivreConnected ? syncing : connectingMercadoLivre}
+          disabled={
+            hasMercadoLivreConnected
+              ? syncing || isMarketplaceSyncing
+              : connectingMercadoLivre
+          }
         >
           {hasMercadoLivreConnected
-            ? syncing
+            ? syncing || isMarketplaceSyncing
               ? "Sincronizando..."
               : "Sincronizar"
             : connectingMercadoLivre
@@ -478,6 +483,21 @@ function Dashboard() {
             }
           >
             {integrationFeedback.message}
+          </div>
+        ) : null}
+        {mercadoLivreStatus?.sync ? (
+          <div className="dashboard-sync-status">
+            <strong>Status da sincronizacao:</strong>{" "}
+            {mercadoLivreStatus.sync.statusLabel || "Aguardando"}
+            {mercadoLivreStatus.sync.lastSyncedAt
+              ? ` | Ultima sincronizacao em ${new Intl.DateTimeFormat("pt-BR", {
+                  day: "2-digit",
+                  month: "2-digit",
+                  year: "numeric",
+                  hour: "2-digit",
+                  minute: "2-digit",
+                }).format(new Date(mercadoLivreStatus.sync.lastSyncedAt))}`
+              : ""}
           </div>
         ) : null}
         {hasMercadoLivreConnected ? null : (

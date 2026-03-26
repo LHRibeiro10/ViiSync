@@ -20,6 +20,7 @@ function IntegrationsHub({ embedded = false }) {
   const [error, setError] = useState("");
   const [actionFeedback, setActionFeedback] = useState(null);
   const [actionLoading, setActionLoading] = useState(false);
+  const isMercadoLivreConnected = Boolean(mercadoLivreStatus?.usingLive);
 
   const loadIntegrationHub = useCallback(async () => {
     try {
@@ -53,6 +54,28 @@ function IntegrationsHub({ embedded = false }) {
     });
     window.setTimeout(() => setActionFeedback(null), 2600);
   }
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    const url = new URL(window.location.href);
+    const connectedFlag = url.searchParams.get("ml");
+
+    if (connectedFlag !== "connected") {
+      return;
+    }
+
+    setActionFeedback({
+      message: "Conta Mercado Livre conectada com sucesso. Atualizando status...",
+      tone: "success",
+    });
+    window.setTimeout(() => setActionFeedback(null), 2600);
+    loadIntegrationHub();
+    url.searchParams.delete("ml");
+    window.history.replaceState({}, "", url.toString());
+  }, [loadIntegrationHub]);
 
   async function handleMercadoLivreReconnect(accountName) {
     try {
@@ -156,13 +179,19 @@ function IntegrationsHub({ embedded = false }) {
           {actionFeedback.message}
         </div>
       ) : null}
-      {mercadoLivreStatus?.usingLive ? (
+      {isMercadoLivreConnected ? (
         <div className="integrations-inline-success">
-          Integracao Mercado Livre em modo live.
+          Conta Mercado Livre conectada. Status da sincronizacao:{" "}
+          {mercadoLivreStatus?.sync?.statusLabel || "Aguardando"}.
+          {mercadoLivreStatus?.sync?.lastSyncedAt
+            ? ` Ultima sincronizacao em ${formatDateTime(
+                mercadoLivreStatus.sync.lastSyncedAt
+              )}.`
+            : ""}
         </div>
       ) : mercadoLivreStatus ? (
         <div className="integrations-inline-alert">
-          Conta Mercado Livre sem credencial live ativa. Conecte via OAuth para sincronizar.
+          Conexao Mercado Livre pendente. Conecte via OAuth para sincronizar.
         </div>
       ) : null}
 
@@ -204,12 +233,12 @@ function IntegrationsHub({ embedded = false }) {
 
                   <div className="integrations-account-grid">
                     <div>
-                      <span>Ultima sync</span>
+                      <span>Ultima sincronizacao</span>
                       <strong>{formatDateTime(account.lastSyncAt)}</strong>
                     </div>
                     <div>
-                      <span>Latencia</span>
-                      <strong>{account.latency}</strong>
+                      <span>Status da sync</span>
+                      <strong>{account.syncStatusLabel || "Aguardando"}</strong>
                     </div>
                     <div>
                       <span>Fila</span>
@@ -222,6 +251,11 @@ function IntegrationsHub({ embedded = false }) {
                   </div>
 
                   <p>{account.note}</p>
+                  {account.syncLastError ? (
+                    <p className="integrations-account-error">
+                      Ultimo erro: {account.syncLastError}
+                    </p>
+                  ) : null}
 
                   <div className="integrations-account-actions">
                     <button
@@ -230,7 +264,7 @@ function IntegrationsHub({ embedded = false }) {
                       onClick={() => handleMercadoLivreReconnect(account.name)}
                       disabled={actionLoading}
                     >
-                      {account.reconnectRecommended ? "Reconectar" : "Renovar autorizacao"}
+                      {account.reconnectRecommended ? "Reconectar" : "Reautorizar"}
                     </button>
                     <button
                       type="button"

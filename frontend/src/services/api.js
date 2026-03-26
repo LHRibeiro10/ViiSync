@@ -193,8 +193,8 @@ export async function getProfitReport(period = "30d") {
   return requestJson(`/profit-report?period=${period}`);
 }
 
-export async function getOrders() {
-  return requestJson("/orders");
+export async function getOrders(params = {}) {
+  return requestJson(`/orders${buildQueryString(params)}`);
 }
 
 export async function getProducts() {

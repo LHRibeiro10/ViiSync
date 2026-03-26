@@ -796,6 +796,17 @@ select:disabled {
   box-shadow: var(--card-shadow-soft);
 }
 
+.dashboard-sync-status {
+  padding: 12px 14px;
+  border-radius: 14px;
+  border: 1px solid var(--border-strong);
+  background: var(--surface-2);
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 700;
+  box-shadow: var(--card-shadow-soft);
+}
+
 .dashboard-ml-connect-box {
   display: flex;
   justify-content: space-between;
@@ -1336,6 +1347,12 @@ select:disabled {
   font-weight: 700;
 }
 
+.profit-inline-warning {
+  color: var(--warning);
+  font-size: 11px;
+  font-weight: 700;
+}
+
 .profit-account-badge {
   display: inline-flex;
   align-items: center;
@@ -1421,6 +1438,17 @@ select:disabled {
   background: var(--danger-soft);
   color: var(--danger);
   border-color: var(--danger-border);
+}
+
+.profit-pill.warning {
+  background: var(--warning-soft);
+  color: var(--warning);
+  border-color: var(--warning-border);
+}
+
+.profit-missing-value {
+  color: var(--warning);
+  font-weight: 800;
 }
 
 .modal-overlay {

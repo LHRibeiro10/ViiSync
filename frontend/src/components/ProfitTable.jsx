@@ -33,6 +33,14 @@ function ProfitProductPhoto({ src, alt }) {
 function ProfitTable({ rows, formatCurrency, formatPercent, onEditRow }) {
   const shouldScrollRows = rows.length > 8;
 
+  function renderCurrencyCell(value, isMissing) {
+    if (isMissing) {
+      return <span className="profit-missing-value">N/D</span>;
+    }
+
+    return formatCurrency(value);
+  }
+
   return (
     <div className="panel profit-table-panel">
       <div className="panel-header">
@@ -65,9 +73,15 @@ function ProfitTable({ rows, formatCurrency, formatPercent, onEditRow }) {
           </thead>
           <tbody>
             {rows.map((row) => {
-              const marginPercent = row.value ? (row.profit / row.value) * 100 : 0;
+              const canRenderProfit = !row.hasDataGaps;
+              const marginPercent =
+                canRenderProfit && row.value ? (row.profit / row.value) * 100 : 0;
               const profitTone =
-                row.profit >= 0 ? "profit-pill positive" : "profit-pill negative";
+                !canRenderProfit
+                  ? "profit-pill warning"
+                  : row.profit >= 0
+                    ? "profit-pill positive"
+                    : "profit-pill negative";
 
               return (
                 <tr key={row.id}>
@@ -77,7 +91,15 @@ function ProfitTable({ rows, formatCurrency, formatPercent, onEditRow }) {
                   <td data-label="Titulo">
                     <div className="profit-title-cell">
                       <strong>{row.title}</strong>
-                      <span>Imposto atual: {formatPercent(row.taxPercent)}</span>
+                      <span>
+                        Imposto atual:{" "}
+                        {row.taxMissing ? "N/D" : formatPercent(row.taxPercent)}
+                      </span>
+                      {row.hasDataGaps ? (
+                        <small className="profit-inline-warning">
+                          Alguns custos ainda nao foram encontrados.
+                        </small>
+                      ) : null}
                     </div>
                   </td>
                   <td data-label="Conta">
@@ -87,11 +109,17 @@ function ProfitTable({ rows, formatCurrency, formatPercent, onEditRow }) {
                   <td data-label="Data" className="profit-muted">{row.date}</td>
                   <td data-label="Qtde">{row.quantity}</td>
                   <td data-label="Valor">{formatCurrency(row.value)}</td>
-                  <td data-label="Tarifa">{formatCurrency(row.fee)}</td>
-                  <td data-label="Frete vendedor">{formatCurrency(row.sellerShipping)}</td>
+                  <td data-label="Tarifa">
+                    {renderCurrencyCell(row.fee, row.feeMissing)}
+                  </td>
+                  <td data-label="Frete vendedor">
+                    {renderCurrencyCell(row.sellerShipping, row.sellerShippingMissing)}
+                  </td>
                   <td data-label="Custo do produto">
                     <div className="profit-cost-cell">
-                      <span>{formatCurrency(row.productCost)}</span>
+                      <span>
+                        {renderCurrencyCell(row.productCost, row.productCostMissing)}
+                      </span>
                       <button
                         type="button"
                         className="profit-edit-button"
@@ -104,8 +132,14 @@ function ProfitTable({ rows, formatCurrency, formatPercent, onEditRow }) {
                   </td>
                   <td data-label="Lucro">
                     <div className="profit-result-cell">
-                      <span className={profitTone}>{formatCurrency(row.profit)}</span>
-                      <small>{formatPercent(marginPercent)} de margem</small>
+                      <span className={profitTone}>
+                        {canRenderProfit ? formatCurrency(row.profit) : "N/D"}
+                      </span>
+                      <small>
+                        {canRenderProfit
+                          ? `${formatPercent(marginPercent)} de margem`
+                          : "Dados incompletos para lucro real"}
+                      </small>
                     </div>
                   </td>
                 </tr>
