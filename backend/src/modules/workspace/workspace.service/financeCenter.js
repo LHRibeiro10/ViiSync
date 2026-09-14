@@ -1,0 +1,445 @@
+const {
+  getFinancialAdjustmentsForUser,
+  getProfitReport,
+  resolvePeriod,
+} = require("../../../services/analyticsDb.service");
+const { shouldAggregatePeriodByMonth } = require("../../../lib/period");
+const prisma = require("../../../lib/prisma");
+const {
+  MONTH_LABELS,
+  createHttpError,
+  roundAmount,
+  addDays,
+  toIsoDate,
+  normalizeText,
+  resolveViewerUser,
+} = require("./shared");
+
+const RECEIVABLE_RATIOS = {
+  "7d": { marketplace: 0.34, secondary: 0.08 },
+  "30d": { marketplace: 0.32, secondary: 0.1 },
+  "90d": { marketplace: 0.3, secondary: 0.12 },
+  "1y": { marketplace: 0.28, secondary: 0.14 },
+};
+
+function normalizeRecurringExpenseCategory(value) {
+  const category = normalizeText(value);
+
+  if (!category) {
+    return "Operacao";
+  }
+
+  return category.slice(0, 40);
+}
+
+function normalizeRecurringExpenseInput(payload = {}) {
+  const description = normalizeText(payload.description);
+  const amount = Number(payload.amount);
+  const dueDay = Number(payload.dueDay);
+  const category = normalizeRecurringExpenseCategory(payload.category);
+
+  if (description.length < 2) {
+    throw createHttpError(400, "Informe a descricao da despesa recorrente.");
+  }
+
+  if (!Number.isFinite(amount) || amount <= 0) {
+    throw createHttpError(400, "Informe um valor valido maior que zero.");
+  }
+
+  if (!Number.isInteger(dueDay) || dueDay < 1 || dueDay > 31) {
+    throw createHttpError(400, "Informe um dia de vencimento entre 1 e 31.");
+  }
+
+  return {
+    description,
+    amount: roundAmount(amount),
+    dueDay,
+    category,
+  };
+}
+
+function clampDueDayToMonth(dueDay, year, monthIndex) {
+  const safeDueDay = Math.max(1, Math.min(31, Number(dueDay) || 1));
+  const monthLastDay = new Date(year, monthIndex + 1, 0).getDate();
+  return Math.min(safeDueDay, monthLastDay);
+}
+
+function resolveNextChargeDate(dueDay, referenceDate = new Date()) {
+  const today = new Date(referenceDate);
+  today.setHours(0, 0, 0, 0);
+
+  let year = today.getFullYear();
+  let monthIndex = today.getMonth();
+  let day = clampDueDayToMonth(dueDay, year, monthIndex);
+  let nextCharge = new Date(year, monthIndex, day);
+
+  if (nextCharge.getTime() < today.getTime()) {
+    monthIndex += 1;
+    if (monthIndex > 11) {
+      monthIndex = 0;
+      year += 1;
+    }
+
+    day = clampDueDayToMonth(dueDay, year, monthIndex);
+    nextCharge = new Date(year, monthIndex, day);
+  }
+
+  nextCharge.setHours(0, 0, 0, 0);
+  return nextCharge;
+}
+
+function mapRecurringExpenseRow(row) {
+  return {
+    id: row.id,
+    description: row.description,
+    amount: roundAmount(Number(row.amount || 0)),
+    category: row.category || "Operacao",
+    nextCharge: resolveNextChargeDate(row.dueDay).toISOString(),
+    status: row.status || "Em uso",
+    dueDay: row.dueDay,
+  };
+}
+
+async function listRecurringExpenseRowsByUser(userId) {
+  if (!userId) {
+    return [];
+  }
+
+  return prisma.recurringExpense.findMany({
+    where: {
+      userId,
+    },
+    orderBy: [{ dueDay: "asc" }, { createdAt: "asc" }],
+  });
+}
+
+function parseReportDate(dateText) {
+  const [day, month, year] = String(dateText || "")
+    .split("/")
+    .map(Number);
+
+  if (!day || !month || !year) {
+    return new Date(0);
+  }
+
+  return new Date(year, month - 1, day);
+}
+
+function formatPeriodLabel(date, period) {
+  if (shouldAggregatePeriodByMonth(period)) {
+    return `${MONTH_LABELS[date.getMonth()]}/${date.getFullYear()}`;
+  }
+
+  return `${String(date.getDate()).padStart(2, "0")}/${String(date.getMonth() + 1).padStart(2, "0")}`;
+}
+
+function buildFinanceBase(rows) {
+  return rows.reduce(
+    (accumulator, row) => ({
+      inflow: accumulator.inflow + row.grossRevenue,
+      netProfit: accumulator.netProfit + row.netProfit,
+      productCost: accumulator.productCost + row.productCost,
+      marketplaceFee: accumulator.marketplaceFee + row.marketplaceFee,
+      shippingPaid: accumulator.shippingPaid + row.shippingPaid,
+    }),
+    {
+      inflow: 0,
+      netProfit: 0,
+      productCost: 0,
+      marketplaceFee: 0,
+      shippingPaid: 0,
+    }
+  );
+}
+
+function buildFinanceGroups(rows, period) {
+  const resolvedPeriod = resolvePeriod(period);
+  const shouldAggregateByMonth = shouldAggregatePeriodByMonth(resolvedPeriod);
+
+  const groups = rows.reduce((accumulator, row) => {
+    const date = parseReportDate(row.date);
+    const key =
+      shouldAggregateByMonth
+        ? `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`
+        : row.date;
+    const currentGroup = accumulator.get(key) || {
+      id: key,
+      label: formatPeriodLabel(date, resolvedPeriod),
+      inflow: 0,
+      net: 0,
+      timestamp: date.getTime(),
+    };
+
+    currentGroup.inflow += row.grossRevenue;
+    currentGroup.net += row.netProfit;
+    accumulator.set(key, currentGroup);
+
+    return accumulator;
+  }, new Map());
+
+  return Array.from(groups.values())
+    .sort((left, right) => left.timestamp - right.timestamp)
+    .map((group, index) => ({
+      id: `cash-${resolvedPeriod}-${index + 1}`,
+      label: group.label,
+      inflow: roundAmount(group.inflow),
+      outflow: roundAmount(group.inflow - group.net),
+      net: roundAmount(group.net),
+    }));
+}
+
+function buildReceivables(rows, period) {
+  const resolvedPeriod = resolvePeriod(period);
+  const ratios = RECEIVABLE_RATIOS[resolvedPeriod] || RECEIVABLE_RATIOS["30d"];
+  const now = new Date();
+
+  const channels = rows.reduce((accumulator, row) => {
+    const current = accumulator.get(row.marketplace) || {
+      marketplace: row.marketplace,
+      revenue: 0,
+    };
+
+    current.revenue += row.grossRevenue;
+    accumulator.set(row.marketplace, current);
+
+    return accumulator;
+  }, new Map());
+
+  const receivables = Array.from(channels.values())
+    .sort((left, right) => right.revenue - left.revenue)
+    .map((channel, index) => ({
+      id: `recv-${resolvedPeriod}-${index + 1}`,
+      marketplace: channel.marketplace,
+      amount: roundAmount(channel.revenue * ratios.marketplace),
+      expectedAt: toIsoDate(addDays(now, index + 1)),
+      status: "Previsto",
+    }));
+
+  if (resolvedPeriod !== "7d") {
+    const useGatewayLabel = shouldAggregatePeriodByMonth(resolvedPeriod);
+    receivables.push({
+      id: `recv-${resolvedPeriod}-extra`,
+      marketplace: useGatewayLabel ? "Gateway bancario" : "Cartao corporativo",
+      amount: roundAmount(
+        rows.reduce((sum, row) => sum + row.grossRevenue, 0) * ratios.secondary
+      ),
+      expectedAt: toIsoDate(addDays(now, 4)),
+      status: "Conciliacao",
+    });
+  }
+
+  return receivables;
+}
+
+function buildFeesByChannel(rows) {
+  const channels = rows.reduce((accumulator, row) => {
+    const current = accumulator.get(row.marketplace) || {
+      id: `fee-${accumulator.size + 1}`,
+      channel: row.marketplace,
+      revenue: 0,
+      feeAmount: 0,
+      profit: 0,
+    };
+
+    current.revenue += row.grossRevenue;
+    current.feeAmount += row.marketplaceFee;
+    current.profit += row.netProfit;
+    accumulator.set(row.marketplace, current);
+
+    return accumulator;
+  }, new Map());
+
+  return Array.from(channels.values())
+    .sort((left, right) => right.revenue - left.revenue)
+    .map((channel) => ({
+      id: channel.id,
+      channel: channel.channel,
+      feeAmount: roundAmount(channel.feeAmount),
+      feePercent: channel.revenue ? roundAmount((channel.feeAmount / channel.revenue) * 100) : 0,
+      netMarginPercent: channel.revenue
+        ? roundAmount((channel.profit / channel.revenue) * 100)
+        : 0,
+    }));
+}
+
+function buildNetProfitBridge(base, adjustments) {
+  const recurringAmount = roundAmount(-(adjustments?.recurringTotal || 0));
+  const additionalAmount = roundAmount(-(adjustments?.additionalTotal || 0));
+  const adjustedNetProfit = roundAmount(base.netProfit + recurringAmount + additionalAmount);
+
+  return [
+    {
+      id: "bridge-1",
+      label: "Receita bruta",
+      amount: roundAmount(base.inflow),
+      tone: "positive",
+    },
+    {
+      id: "bridge-2",
+      label: "Custos de produto",
+      amount: roundAmount(-base.productCost),
+      tone: "negative",
+    },
+    {
+      id: "bridge-3",
+      label: "Taxas marketplace",
+      amount: roundAmount(-base.marketplaceFee),
+      tone: "negative",
+    },
+    {
+      id: "bridge-4",
+      label: "Frete subsidiado",
+      amount: roundAmount(-base.shippingPaid),
+      tone: "negative",
+    },
+    {
+      id: "bridge-5",
+      label: "Despesas recorrentes",
+      amount: recurringAmount,
+      tone: recurringAmount < 0 ? "negative" : "neutral",
+    },
+    {
+      id: "bridge-6",
+      label: "Gastos adicionais",
+      amount: additionalAmount,
+      tone: additionalAmount < 0 ? "negative" : "neutral",
+    },
+    {
+      id: "bridge-7",
+      label: "Lucro liquido",
+      amount: adjustedNetProfit,
+      tone: adjustedNetProfit >= 0 ? "positive" : "negative",
+    },
+  ];
+}
+
+function buildFinanceInsights({
+  base,
+  recurringTotal,
+  additionalTotal,
+  receivables,
+  feesByChannel,
+}) {
+  const receivablesTotal = receivables.reduce((sum, item) => sum + item.amount, 0);
+  const strongestChannel = feesByChannel[0];
+  const weakestChannel = feesByChannel[feesByChannel.length - 1];
+  const consolidatedAdjustments = recurringTotal + additionalTotal;
+  const recurringShare = base.netProfit ? (consolidatedAdjustments / base.netProfit) * 100 : 0;
+
+  return [
+    strongestChannel
+      ? `${strongestChannel.channel} concentra o maior volume financeiro e fecha com margem liquida de ${strongestChannel.netMarginPercent.toFixed(1)}% no recorte.`
+      : "Ainda nao ha canal dominante o suficiente para leitura financeira.",
+    `Os repasses previstos somam R$ ${receivablesTotal.toFixed(2).replace(".", ",")} e ajudam a sustentar o caixa de curto prazo.`,
+    `Despesas recorrentes e gastos adicionais representam ${recurringShare.toFixed(1).replace(".", ",")}% do lucro liquido transacional no mesmo periodo.`,
+    weakestChannel && weakestChannel.channel !== strongestChannel?.channel
+      ? `${weakestChannel.channel} pede revisao de taxa e mix porque entrega o menor retorno relativo entre os canais ativos.`
+      : "O mix de canais ainda esta concentrado, entao vale monitorar dependencia operacional.",
+  ];
+}
+
+async function getFinanceCenter(period = "30d", request = {}) {
+  const user = await resolveViewerUser(request);
+  const resolvedPeriod = resolvePeriod(period);
+  const rows = await getProfitReport(resolvedPeriod, request);
+  const base = buildFinanceBase(rows);
+  const recurringExpenses = (await listRecurringExpenseRowsByUser(user.id)).map(
+    mapRecurringExpenseRow
+  );
+  const receivables = buildReceivables(rows, resolvedPeriod);
+  const feesByChannel = buildFeesByChannel(rows);
+  const adjustments = await getFinancialAdjustmentsForUser(user.id, resolvedPeriod);
+  const adjustedNetProfit = roundAmount(base.netProfit - adjustments.totalAdjustments);
+  const netProfitBridge = buildNetProfitBridge(base, adjustments);
+  const insights = buildFinanceInsights({
+    base,
+    recurringTotal: adjustments.recurringTotal,
+    additionalTotal: adjustments.additionalTotal,
+    receivables,
+    feesByChannel,
+  });
+
+  return {
+    period: resolvedPeriod,
+    summary: {
+      inflow: roundAmount(base.inflow),
+      outflow: roundAmount(base.inflow - adjustedNetProfit),
+      netProfit: adjustedNetProfit,
+      netProfitBeforeAdjustments: roundAmount(base.netProfit),
+      receivables: roundAmount(
+        receivables.reduce((sum, item) => sum + item.amount, 0)
+      ),
+      recurringExpenses: roundAmount(adjustments.recurringTotal),
+      additionalCosts: roundAmount(adjustments.additionalTotal),
+    },
+    cashFlow: buildFinanceGroups(rows, resolvedPeriod),
+    recurringExpenses,
+    receivables,
+    feesByChannel,
+    netProfitBridge,
+    insights,
+  };
+}
+
+async function createRecurringExpense(payload = {}, period = "30d", request = {}) {
+  const user = await resolveViewerUser(request);
+
+  const normalized = normalizeRecurringExpenseInput(payload);
+
+  await prisma.recurringExpense.create({
+    data: {
+      userId: user.id,
+      description: normalized.description,
+      amount: normalized.amount,
+      category: normalized.category,
+      dueDay: normalized.dueDay,
+      status: "Em uso",
+    },
+  });
+
+  return {
+    ...(await getFinanceCenter(period, request)),
+    message: "Despesa recorrente cadastrada com sucesso.",
+  };
+}
+
+async function removeRecurringExpense(expenseId, period = "30d", request = {}) {
+  const user = await resolveViewerUser(request);
+
+  const id = normalizeText(expenseId);
+
+  if (!id) {
+    throw createHttpError(400, "Despesa recorrente invalida.");
+  }
+
+  const found = await prisma.recurringExpense.findFirst({
+    where: {
+      id,
+      userId: user.id,
+    },
+    select: {
+      id: true,
+    },
+  });
+
+  if (!found) {
+    throw createHttpError(404, "Despesa recorrente nao encontrada.");
+  }
+
+  await prisma.recurringExpense.delete({
+    where: {
+      id: found.id,
+    },
+  });
+
+  return {
+    ...(await getFinanceCenter(period, request)),
+    message: "Despesa recorrente removida com sucesso.",
+  };
+}
+
+module.exports = {
+  getFinanceCenter,
+  createRecurringExpense,
+  removeRecurringExpense,
+};

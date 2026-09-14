@@ -1,8 +1,0 @@
-=3012 : O termo '=3012' n∆o Ç reconhecido como nome de cmdlet, funá∆o, arquivo de script ou programa oper†vel. 
-Verifique a grafia do nome ou, se um caminho tiver sido inclu°do, veja se o caminho est† correto e tente novamente.
-No linha:1 caractere:1
-+ ='3012'; node server.js
-+ ~~~~~~~
-    + CategoryInfo          : ObjectNotFound: (=3012:String) [], CommandNotFoundException
-    + FullyQualifiedErrorId : CommandNotFoundException
- 

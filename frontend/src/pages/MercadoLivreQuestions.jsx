@@ -6,22 +6,20 @@ import {
   useRef,
   useState,
 } from "react";
-import PageHeader from "../components/PageHeader";
 import MercadoLivreQuestionDetails from "../components/mercadoLivreQuestions/MercadoLivreQuestionDetails";
 import MercadoLivreQuestionFilters from "../components/mercadoLivreQuestions/MercadoLivreQuestionFilters";
 import MercadoLivreQuestionsList from "../components/mercadoLivreQuestions/MercadoLivreQuestionsList";
+import MercadoLivreQuestionsOverview from "../components/mercadoLivreQuestions/MercadoLivreQuestionsOverview";
 import {
   dismissAnsweredMercadoLivreQuestions,
   getMercadoLivreQuestion,
-  getMercadoLivreQuestions,
-  refreshMercadoLivreQuestions,
   replyMercadoLivreQuestion,
 } from "../services/api";
 import {
-  formatAverageResponse,
-  formatQuestionSyncLabel,
-  formatResponseRate,
-} from "../utils/mercadoLivreQuestions";
+  buildActiveFilters,
+  buildQuestionsOverview,
+  requestQuestions,
+} from "../utils/mercadoLivreQuestionsInsights";
 import "./MercadoLivreQuestions.css";
 
 const DEFAULT_FILTERS = {
@@ -30,21 +28,6 @@ const DEFAULT_FILTERS = {
   period: "30d",
   sort: "recent",
 };
-
-function buildActiveFilters(filters, searchTerm) {
-  return {
-    ...filters,
-    search: String(searchTerm ?? "").trim(),
-  };
-}
-
-async function requestQuestions(filters, useRefresh = false) {
-  if (useRefresh) {
-    return refreshMercadoLivreQuestions(filters);
-  }
-
-  return getMercadoLivreQuestions(filters);
-}
 
 function MercadoLivreQuestions() {
   const [filters, setFilters] = useState(DEFAULT_FILTERS);
@@ -304,101 +287,19 @@ function MercadoLivreQuestions() {
     });
   }
 
-  const overview = questionsPayload?.meta?.overview || {
-    total: 0,
-    answered: 0,
-    unanswered: 0,
-    urgent: 0,
-    averageResponseHours: 0,
-    responseRate: 0,
-  };
-  const overviewCards = [
-    {
-      id: "pending",
-      label: "Nao respondidas",
-      value: overview.unanswered,
-      description: "Trate primeiro as mais antigas para evitar impacto em conversao.",
-      tone: "warning",
-    },
-    {
-      id: "answered",
-      label: "Respondidas",
-      value: overview.answered,
-      description: `${formatResponseRate(overview.responseRate)} da fila concluida no recorte atual.`,
-      tone: "success",
-    },
-    {
-      id: "urgent",
-      label: "Urgentes",
-      value: overview.urgent,
-      description: "Prioridade imediata para reduzir risco operacional e reputacional.",
-      tone: "danger",
-    },
-    {
-      id: "announcements",
-      label: "Anuncios monitorados",
-      value: questionsPayload?.meta?.announcementCount || 0,
-      description: `SLA medio atual em ${formatAverageResponse(
-        overview.averageResponseHours
-      )}.`,
-      tone: "neutral",
-    },
-  ];
+  const { overview, overviewCards } = buildQuestionsOverview(questionsPayload);
 
   return (
     <div className="ml-questions-page">
-      <PageHeader
-        tag="Atendimento"
-        title="Perguntas do Mercado Livre"
-        description="Centralize a caixa de perguntas dos anuncios, filtre a fila e responda sem sair do ViiSync."
-      >
-        <div
-          className={`ml-questions-header-chip ${
-            overview.urgent > 0 ? "is-critical" : ""
-          }`}
-        >
-          <strong>{overview.unanswered}</strong>
-          <span>pendentes</span>
-          <small>
-            {overview.urgent > 0
-              ? `${overview.urgent} urgente(s) para priorizar`
-              : "fila sem urgencias criticas"}
-          </small>
-        </div>
-        <button
-          type="button"
-          onClick={handleRefreshQuestions}
-          disabled={listRefreshing}
-        >
-          {listRefreshing ? "Atualizando..." : "Atualizar dados"}
-        </button>
-      </PageHeader>
-
-      <div className="ml-questions-page-subtitle">
-        <span>{formatQuestionSyncLabel(questionsPayload?.meta?.lastSyncAt)}</span>
-        <span>
-          {questionsPayload?.meta?.filteredTotal || 0} pergunta(s) visiveis no recorte
-          atual |{" "}
-          {overview.urgent > 0
-            ? `${overview.urgent} urgente(s) exigem resposta imediata`
-            : "sem urgencias criticas no momento"}
-        </span>
-      </div>
-
-      <div className="ml-questions-overview-grid">
-        {overviewCards.map((card) => (
-          <article
-            key={card.id}
-            className={`ml-questions-stat-card is-${card.tone} ${
-              !questionsPayload && listLoading ? "is-loading" : ""
-            }`}
-          >
-            <span>{card.label}</span>
-            <strong>{card.value}</strong>
-            <p>{card.description}</p>
-          </article>
-        ))}
-      </div>
+      <MercadoLivreQuestionsOverview
+        overview={overview}
+        overviewCards={overviewCards}
+        meta={questionsPayload?.meta}
+        listLoading={listLoading}
+        listRefreshing={listRefreshing}
+        hasQuestionsPayload={Boolean(questionsPayload)}
+        onRefresh={handleRefreshQuestions}
+      />
 
       <MercadoLivreQuestionFilters
         filters={filters}

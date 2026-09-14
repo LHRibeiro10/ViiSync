@@ -1,5 +1,6 @@
 const express = require("express");
 const cors = require("cors");
+const helmet = require("helmet");
 require("dotenv").config();
 
 const {
@@ -88,6 +89,14 @@ function buildCorsOptions() {
   };
 }
 
+app.use(
+  helmet({
+    // O callback OAuth do Mercado Livre (handleMercadoLivreOAuthCallback) responde
+    // com uma pagina HTML que usa um <script> inline para fechar o popup; o CSP
+    // padrao do helmet bloquearia esse script, entao desabilitamos aqui.
+    contentSecurityPolicy: false,
+  })
+);
 app.use(cors(buildCorsOptions()));
 app.use(express.json());
 

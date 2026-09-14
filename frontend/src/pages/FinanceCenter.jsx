@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
 import PageHeader from "../components/PageHeader";
+import ReceivablesSection from "../components/financeCenter/ReceivablesSection";
+import InvoicesSection from "../components/financeCenter/InvoicesSection";
 import { useAnalyticsPeriod } from "../contexts/useAnalyticsPeriod";
 import {
   createRecurringFinanceExpense,
@@ -14,21 +16,11 @@ import {
 import {
   formatCurrency,
   formatDate,
-  formatDateTime,
   formatPercent,
 } from "../utils/presentation";
+import { triggerFileDownload } from "../utils/fileDownload";
+import { toSafeNumber, buildActionableInsights } from "../utils/financeInsights";
 import "./FinanceCenter.css";
-
-function triggerDocumentDownload(blob, fileName) {
-  const objectUrl = window.URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = objectUrl;
-  link.download = fileName;
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
-  window.URL.revokeObjectURL(objectUrl);
-}
 
 function parseRecurringAmount(value) {
   const text = String(value || "").trim();
@@ -45,142 +37,6 @@ function parseRecurringAmount(value) {
   const normalized = text.replace(/[^\d.-]/g, "");
   const parsed = Number(normalized);
   return Number.isFinite(parsed) ? parsed : 0;
-}
-
-function toSafeNumber(value) {
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : 0;
-}
-
-function buildActionableInsights(payload, invoicePayload) {
-  if (!payload) {
-    return [];
-  }
-
-  const insights = [];
-  const netProfit = toSafeNumber(payload.summary?.netProfit);
-  const recurringTotal = payload.recurringExpenses.reduce(
-    (sum, expense) => sum + toSafeNumber(expense.amount),
-    0
-  );
-  const receivablesTotal = payload.receivables.reduce(
-    (sum, receivable) => sum + toSafeNumber(receivable.amount),
-    0
-  );
-  const pendingInvoices = toSafeNumber(invoicePayload?.meta?.pendingCount);
-  const hasInvoiceHistory = toSafeNumber(invoicePayload?.meta?.total) > 0;
-  const channelsByFeePercent = [...payload.feesByChannel].sort(
-    (left, right) => toSafeNumber(right.feePercent) - toSafeNumber(left.feePercent)
-  );
-  const channelsByMargin = [...payload.feesByChannel].sort(
-    (left, right) =>
-      toSafeNumber(left.netMarginPercent) - toSafeNumber(right.netMarginPercent)
-  );
-  const highestFeeChannel = channelsByFeePercent[0];
-  const lowestMarginChannel = channelsByMargin[0];
-
-  if (netProfit <= 0) {
-    insights.push({
-      id: "net-profit-pressure",
-      tone: "critical",
-      title: "Rentabilidade comprometida",
-      description:
-        "Lucro liquido zerado ou negativo no periodo. Priorize corte de custos fixos e revisao de preco nos canais com menor margem.",
-    });
-  } else if (recurringTotal > 0) {
-    const recurringShare = recurringTotal / netProfit;
-
-    if (recurringShare >= 0.4) {
-      insights.push({
-        id: "recurring-pressure",
-        tone: "warning",
-        title: "Despesas recorrentes pressionam margem",
-        description: `${formatPercent(
-          recurringShare
-        )} do lucro liquido ja esta comprometido com custos fixos. Renegocie contratos de maior impacto nesta semana.`,
-      });
-    } else if (recurringShare >= 0.2) {
-      insights.push({
-        id: "recurring-monitor",
-        tone: "info",
-        title: "Custos fixos pedem acompanhamento",
-        description: `Despesas recorrentes consomem ${formatPercent(
-          recurringShare
-        )} do lucro liquido. Mantenha revisao mensal para preservar margem.`,
-      });
-    }
-  }
-
-  if (pendingInvoices > 0) {
-    insights.push({
-      id: "invoice-pending",
-      tone: "warning",
-      title: "Pendencias fiscais no periodo",
-      description: `${pendingInvoices} NFe(s) ainda nao foram puxadas. Atualize agora para liberar XML/PDF antes do fechamento contabil.`,
-    });
-  } else if (hasInvoiceHistory) {
-    insights.push({
-      id: "invoice-ok",
-      tone: "success",
-      title: "Documentacao fiscal em dia",
-      description:
-        "NFes do periodo estao sincronizadas. Mantenha a rotina de conferencia para evitar pendencias de ultima hora.",
-    });
-  }
-
-  if (receivablesTotal > 0) {
-    insights.push({
-      id: "receivables-cash",
-      tone: "info",
-      title: "Repasses ajudam o caixa de curto prazo",
-      description: `${formatCurrency(
-        receivablesTotal
-      )} estao previstos para receber. Programe pagamentos fixos nas mesmas datas para reduzir pressao de caixa.`,
-    });
-  } else {
-    insights.push({
-      id: "receivables-empty",
-      tone: "neutral",
-      title: "Sem repasses previstos no recorte",
-      description:
-        "Amplie o periodo ou sincronize vendas para melhorar previsibilidade de caixa e evitar decisoes no escuro.",
-    });
-  }
-
-  if (lowestMarginChannel && toSafeNumber(lowestMarginChannel.netMarginPercent) <= 0.12) {
-    insights.push({
-      id: "channel-margin-alert",
-      tone: "warning",
-      title: "Canal com margem apertada",
-      description: `${lowestMarginChannel.channel} opera com margem liquida de ${formatPercent(
-        lowestMarginChannel.netMarginPercent
-      )}. Revise preco e custo antes de escalar investimento nesse canal.`,
-    });
-  } else if (
-    highestFeeChannel &&
-    toSafeNumber(highestFeeChannel.feePercent) >= 0.15
-  ) {
-    insights.push({
-      id: "channel-fee-alert",
-      tone: "info",
-      title: "Concentracao de taxa por canal",
-      description: `${highestFeeChannel.channel} concentra taxa de ${formatPercent(
-        highestFeeChannel.feePercent
-      )} sobre a receita. Monitore repasse e frete para proteger margem liquida.`,
-    });
-  }
-
-  if (!insights.length) {
-    insights.push({
-      id: "insufficient-data",
-      tone: "neutral",
-      title: "Base financeira em formacao",
-      description:
-        "Sincronize pedidos e despesas para gerar leituras acionaveis de margem, repasses e custo por canal.",
-    });
-  }
-
-  return insights.slice(0, 4);
 }
 
 function FinanceCenter() {
@@ -308,7 +164,7 @@ function FinanceCenter() {
       setDownloadingDocumentKey(busyKey);
       setInvoiceError("");
       const response = await downloadMercadoLivreInvoiceDocument(invoiceId, format);
-      triggerDocumentDownload(response.blob, response.fileName);
+      triggerFileDownload(response.fileName, response.blob);
       setInvoiceFeedback(
         format === "xml"
           ? "XML baixado no dispositivo."
@@ -463,241 +319,6 @@ function FinanceCenter() {
     [highestFeeChannel?.id, lowestMarginChannel?.id].filter(Boolean)
   );
 
-  const receivablesSection = (
-    <section className="panel finance-receivables-panel">
-      <div className="finance-panel-header">
-        <div>
-          <h2>Repasses a receber</h2>
-          <p>Projecoes de entrada para sustentar o caixa de curto prazo.</p>
-        </div>
-      </div>
-
-      <div
-        className={`finance-receivables-grid ui-scroll-region ${
-          shouldScrollReceivables ? "is-scrollable scroll-region-medium" : ""
-        }`}
-      >
-        {payload.receivables.length ? (
-          payload.receivables.map((item) => (
-            <div key={item.id} className="finance-list-item finance-receivable-card">
-              <div>
-                <strong>{item.marketplace}</strong>
-                <p>{formatDate(item.expectedAt)}</p>
-              </div>
-              <div className="finance-list-values">
-                <span>{item.status}</span>
-                <strong>{formatCurrency(item.amount)}</strong>
-              </div>
-            </div>
-          ))
-        ) : (
-          <div className="finance-empty-state">
-            <strong>Nenhum repasse previsto no periodo.</strong>
-            <p>Amplie o recorte ou sincronize pedidos para projetar melhor seu caixa.</p>
-          </div>
-        )}
-      </div>
-    </section>
-  );
-
-  const invoicesSection = (
-    <section className="panel finance-invoices-panel">
-      <div className="finance-panel-header">
-        <div>
-          <h2>NFes Mercado Livre</h2>
-          <p>
-            Garanta XML e PDF disponiveis para fechamento contabil, suporte ao cliente
-            e rotina fiscal sem retrabalho.
-          </p>
-        </div>
-
-        <div className="finance-invoices-actions">
-          <button
-            type="button"
-            className="finance-invoices-primary"
-            onClick={handlePullPendingInvoices}
-            disabled={pullingAllInvoices || !invoicePayload?.meta?.pendingCount}
-          >
-            {pullingAllInvoices ? "Atualizando NFes..." : "Atualizar NFes pendentes"}
-          </button>
-        </div>
-      </div>
-
-      {invoiceError ? <div className="finance-inline-alert">{invoiceError}</div> : null}
-
-      {invoiceFeedback ? (
-        <div className="finance-inline-note">{invoiceFeedback}</div>
-      ) : null}
-
-      <div className="finance-invoices-summary-grid">
-        <article className="finance-invoice-summary-card">
-          <span>Documentos no periodo</span>
-          <strong>{invoicePayload?.meta?.total ?? 0}</strong>
-        </article>
-        <article className="finance-invoice-summary-card">
-          <span>XML pronto para fechamento</span>
-          <strong>{invoicePayload?.meta?.xmlDownloadedCount ?? 0}</strong>
-        </article>
-        <article className="finance-invoice-summary-card">
-          <span>PDF pronto para consulta</span>
-          <strong>{invoicePayload?.meta?.pdfDownloadedCount ?? 0}</strong>
-        </article>
-        <article className="finance-invoice-summary-card">
-          <span>Pendentes de pull</span>
-          <strong>{invoicePayload?.meta?.pendingCount ?? 0}</strong>
-        </article>
-      </div>
-
-      <div className="finance-invoice-sync-note">
-        <div>
-          <span>Ultima atualizacao fiscal</span>
-          <strong>
-            {invoicePayload?.meta?.lastPullAt
-              ? formatDateTime(invoicePayload.meta.lastPullAt)
-              : "--"}
-          </strong>
-        </div>
-        <p>
-          {(invoicePayload?.meta?.pendingCount || 0) > 0
-            ? `${invoicePayload.meta.pendingCount} pendencia(s) ativa(s). Execute o pull para regularizar os documentos.`
-            : "Sem pendencias abertas no momento para o periodo selecionado."}
-        </p>
-      </div>
-
-      <div
-        className={`finance-invoice-list ui-scroll-region ${
-          shouldScrollInvoices ? "is-scrollable scroll-region-tall" : ""
-        }`}
-      >
-        {invoicePayload?.items?.length ? (
-          invoicePayload.items.map((invoice) => (
-            <article key={invoice.id} className="finance-invoice-item">
-              <div className="finance-invoice-main">
-                <div className="finance-invoice-title-row">
-                  <strong>{invoice.itemTitle}</strong>
-                  <span className={`finance-invoice-badge is-${invoice.statusTone}`}>
-                    {invoice.statusLabel}
-                  </span>
-                </div>
-
-                <p>
-                  NFe {invoice.invoiceNumber} | serie {invoice.series} | pedido{" "}
-                  {invoice.orderId}
-                </p>
-
-                <div className="finance-invoice-meta">
-                  <span>Emitida em {formatDateTime(invoice.issuedAt)}</span>
-                  <span>Valor {formatCurrency(invoice.amount)}</span>
-                  <span>Chave {invoice.accessKey}</span>
-                </div>
-
-                <div className="finance-invoice-documents">
-                  <div className="finance-invoice-document">
-                    <span>XML para contabil</span>
-                    <strong>{invoice.xmlStatusLabel}</strong>
-                    <small>
-                      {invoice.downloadedXmlAt
-                        ? `Disponivel desde ${formatDateTime(invoice.downloadedXmlAt)}`
-                        : "Puxe esta NFe para liberar o XML do fechamento."}
-                    </small>
-                  </div>
-
-                  <div className="finance-invoice-document">
-                    <span>PDF para conferencia</span>
-                    <strong>{invoice.pdfStatusLabel}</strong>
-                    <small>
-                      {invoice.downloadedPdfAt
-                        ? `Disponivel desde ${formatDateTime(invoice.downloadedPdfAt)}`
-                        : "Gere no pull para consulta rapida e atendimento."}
-                    </small>
-                  </div>
-                </div>
-              </div>
-
-              <div className="finance-invoice-actions">
-                <div className="finance-invoice-file-group">
-                  <span className="finance-invoice-file">
-                    XML no storage: {invoice.xmlUrl || "pendente"}
-                  </span>
-                  <span className="finance-invoice-file">
-                    PDF no storage: {invoice.pdfUrl || "pendente"}
-                  </span>
-                  <span className="finance-invoice-file">
-                    Referencia interna: {invoice.storagePath}
-                  </span>
-                </div>
-
-                <div className="finance-invoice-download-group">
-                  <button
-                    type="button"
-                    className="finance-invoices-download"
-                    onClick={() => handleDownloadInvoiceDocument(invoice.id, "xml")}
-                    disabled={
-                      !invoice.xmlDownloaded ||
-                      downloadingDocumentKey === `${invoice.id}:xml`
-                    }
-                  >
-                    {downloadingDocumentKey === `${invoice.id}:xml`
-                      ? "Baixando XML..."
-                      : "Baixar XML"}
-                  </button>
-
-                  <button
-                    type="button"
-                    className="finance-invoices-download"
-                    onClick={() => handleDownloadInvoiceDocument(invoice.id, "pdf")}
-                    disabled={
-                      !invoice.pdfDownloaded ||
-                      downloadingDocumentKey === `${invoice.id}:pdf`
-                    }
-                  >
-                    {downloadingDocumentKey === `${invoice.id}:pdf`
-                      ? "Baixando PDF..."
-                      : "Baixar PDF"}
-                  </button>
-                </div>
-
-                <button
-                  type="button"
-                  className="finance-invoices-secondary"
-                  onClick={() => handlePullSingleInvoice(invoice.id)}
-                  disabled={!invoice.canPull || busyInvoiceId === invoice.id}
-                >
-                  {busyInvoiceId === invoice.id
-                    ? "Puxando..."
-                    : invoice.canPull
-                      ? "Puxar NFe"
-                      : "Ja baixada"}
-                </button>
-
-                {invoice.canDismiss ? (
-                  <button
-                    type="button"
-                    className="finance-invoices-danger"
-                    onClick={() => handleDismissInvoice(invoice.id)}
-                    disabled={dismissingInvoiceId === invoice.id}
-                  >
-                    {dismissingInvoiceId === invoice.id
-                      ? "Excluindo..."
-                      : "Excluir da lista"}
-                  </button>
-                ) : null}
-              </div>
-            </article>
-          ))
-        ) : (
-          <div className="finance-empty-state">
-            <strong>Nenhuma NFe do Mercado Livre neste recorte.</strong>
-            <p>
-              Revise o periodo selecionado ou atualize NFes pendentes para manter os
-              documentos fiscais prontos para operacao.
-            </p>
-          </div>
-        )}
-      </div>
-    </section>
-  );
-
   return (
     <div className="finance-page">
       <PageHeader
@@ -750,7 +371,20 @@ function FinanceCenter() {
         ))}
       </div>
 
-      {invoicesSection}
+      <InvoicesSection
+        invoicePayload={invoicePayload}
+        invoiceError={invoiceError}
+        invoiceFeedback={invoiceFeedback}
+        pullingAllInvoices={pullingAllInvoices}
+        busyInvoiceId={busyInvoiceId}
+        downloadingDocumentKey={downloadingDocumentKey}
+        dismissingInvoiceId={dismissingInvoiceId}
+        shouldScroll={shouldScrollInvoices}
+        handlePullPendingInvoices={handlePullPendingInvoices}
+        handlePullSingleInvoice={handlePullSingleInvoice}
+        handleDownloadInvoiceDocument={handleDownloadInvoiceDocument}
+        handleDismissInvoice={handleDismissInvoice}
+      />
 
       <div className="finance-layout">
         <section className="panel finance-main-panel">
@@ -919,7 +553,10 @@ function FinanceCenter() {
         </div>
       </div>
 
-      {receivablesSection}
+      <ReceivablesSection
+        receivables={payload.receivables}
+        shouldScroll={shouldScrollReceivables}
+      />
 
       <div className="finance-secondary-grid">
         <section className="panel finance-channel-panel">
