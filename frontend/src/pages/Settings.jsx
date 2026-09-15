@@ -133,13 +133,9 @@ function Settings() {
   const isAdmin = String(user?.role || "").toUpperCase() === "ADMIN";
   const twoFactorMeta = getTwoFactorMeta(data?.security?.twoFactor);
   const hasPasswordHistory = Boolean(data?.security?.lastPasswordChange);
-  const hasLastAccess = Boolean(data?.security?.lastAccess);
   const lastPasswordChangeLabel = hasPasswordHistory
     ? data.security.lastPasswordChange
     : "Nao informado";
-  const lastAccessLabel = hasLastAccess
-    ? data.security.lastAccess
-    : "Nao disponivel nesta versao";
   const securityHighlightTone =
     twoFactorMeta.tone === "positive" ? "positive" : "warning";
   const accountStatusTone = getSecurityStatusTone(statusLabel);
@@ -168,30 +164,9 @@ function Settings() {
             : "Recurso nao existe nesta versao do produto",
         guidance: twoFactorMeta.guidance,
       },
-      {
-        id: "last-access",
-        title: "Ultimo acesso confirmado",
-        tone: hasLastAccess ? "positive" : "neutral",
-        badge: hasLastAccess ? "Registrado" : "Em preparo",
-        value: lastAccessLabel,
-        guidance: hasLastAccess
-          ? "Use este dado para auditar acessos recentes."
-          : "Historico de ultimo login com detalhes de origem sera exibido aqui em breve.",
-      },
-      {
-        id: "sessions",
-        title: "Sessoes e dispositivos",
-        tone: "neutral",
-        badge: "Planejado",
-        value: "Gestao de sessoes indisponivel nesta versao",
-        guidance:
-          "Em versoes futuras, sera possivel revisar dispositivos ativos e encerrar sessoes remotamente.",
-      },
     ],
     [
-      hasLastAccess,
       hasPasswordHistory,
-      lastAccessLabel,
       lastPasswordChangeLabel,
       twoFactorMeta.guidance,
       twoFactorMeta.label,
