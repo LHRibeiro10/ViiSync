@@ -50,7 +50,7 @@ function formatStatus(status) {
 function getTwoFactorMeta(twoFactorValue) {
   const normalized = String(twoFactorValue || "").trim().toLowerCase();
 
-  if (normalized.includes("ativado") || normalized.includes("enabled")) {
+  if (normalized === "ativado" || normalized === "enabled") {
     return {
       label: "Ativado",
       tone: "positive",
@@ -59,9 +59,9 @@ function getTwoFactorMeta(twoFactorValue) {
   }
 
   return {
-    label: twoFactorValue || "Desativado",
-    tone: "warning",
-    guidance: "Ative 2FA quando o recurso estiver disponivel para elevar seguranca.",
+    label: "Nao disponivel nesta versao",
+    tone: "neutral",
+    guidance: "Verificacao em duas etapas ainda nao existe como recurso do produto.",
   };
 }
 
@@ -165,7 +165,7 @@ function Settings() {
         value:
           twoFactorMeta.tone === "positive"
             ? "Camada adicional ativa para login"
-            : "Recurso ainda nao habilitado nesta conta",
+            : "Recurso nao existe nesta versao do produto",
         guidance: twoFactorMeta.guidance,
       },
       {
