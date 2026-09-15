@@ -430,6 +430,25 @@
   box-shadow: var(--button-secondary-shadow);
 }
 
+.settings-inline-note {
+  padding: 12px 16px;
+  border-radius: 14px;
+  font-weight: 600;
+  margin-bottom: 12px;
+}
+
+.settings-inline-note.is-success {
+  background: var(--success-soft);
+  color: var(--success);
+  border: 1px solid var(--success-border);
+}
+
+.settings-inline-note.is-error {
+  background: var(--danger-soft);
+  color: var(--danger);
+  border: 1px solid var(--danger-border);
+}
+
 @media (max-width: 900px) {
   .settings-grid {
     grid-template-columns: 1fr;

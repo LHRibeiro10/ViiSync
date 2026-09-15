@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { getSettings } from "../services/api";
+import { getSettings, requestPasswordReset } from "../services/api";
 import PageHeader from "../components/PageHeader";
 import { useAnalyticsPeriod } from "../contexts/useAnalyticsPeriod";
 import { useAuthSession } from "../contexts/useAuthSession";
@@ -89,6 +89,8 @@ function Settings() {
   const [notificationsEnabled, setNotificationsEnabled] = useState(
     resolveStoredNotifications
   );
+  const [changePasswordLoading, setChangePasswordLoading] = useState(false);
+  const [passwordActionFeedback, setPasswordActionFeedback] = useState(null);
 
   useEffect(() => {
     async function loadSettings() {
@@ -149,9 +151,8 @@ function Settings() {
         value: hasPasswordHistory
           ? `Ultima troca em ${lastPasswordChangeLabel}`
           : "Nenhuma troca de senha registrada",
-        guidance: hasPasswordHistory
-          ? "Fluxo de alteracao direta de senha sera disponibilizado nesta area em evolucao futura."
-          : "Quando o fluxo estiver ativo, atualize a senha para reforcar seguranca da conta.",
+        guidance:
+          "Clique em \"Alterar senha\" para receber um link de redefinicao no seu e-mail cadastrado.",
       },
       {
         id: "two-factor",
@@ -182,6 +183,35 @@ function Settings() {
   async function handleLogout() {
     await clearSession();
     navigate("/login", { replace: true });
+  }
+
+  async function handleChangePassword() {
+    setPasswordActionFeedback(null);
+
+    try {
+      setChangePasswordLoading(true);
+
+      const response = await requestPasswordReset({
+        email: data.profile.email,
+      });
+
+      setPasswordActionFeedback({
+        tone: "success",
+        message:
+          response?.message ||
+          "Enviamos um link de redefinicao de senha para o seu e-mail.",
+      });
+    } catch (actionError) {
+      setPasswordActionFeedback({
+        tone: "error",
+        message:
+          actionError?.status === 429
+            ? "Muitas tentativas em pouco tempo. Aguarde alguns minutos e tente novamente."
+            : actionError?.message || "Nao foi possivel solicitar a troca de senha.",
+      });
+    } finally {
+      setChangePasswordLoading(false);
+    }
   }
 
   if (loading) return <div className="screen-message">Carregando configuracoes...</div>;
@@ -317,9 +347,20 @@ function Settings() {
             ))}
           </div>
 
+          {passwordActionFeedback ? (
+            <div className={`settings-inline-note is-${passwordActionFeedback.tone}`}>
+              {passwordActionFeedback.message}
+            </div>
+          ) : null}
+
           <div className="settings-actions">
-            <button className="secondary is-muted" type="button" disabled>
-              Alterar senha (em breve)
+            <button
+              className="secondary"
+              type="button"
+              onClick={handleChangePassword}
+              disabled={changePasswordLoading}
+            >
+              {changePasswordLoading ? "Enviando..." : "Alterar senha"}
             </button>
             <button className="secondary" type="button" onClick={handleLogout}>
               Encerrar sessao atual
