@@ -105,14 +105,19 @@ async function getIntegrationHub(request = {}) {
       const tokenExpiresAtMs = account.tokenExpiresAt
         ? new Date(account.tokenExpiresAt).getTime()
         : null;
+      // O access token do Mercado Livre vive cerca de 6 horas e e renovado
+      // automaticamente por ensureLiveAccountToken sempre que existe refresh
+      // token. Nesse caso a expiracao nao e risco operacional e nao deve virar
+      // alerta na tela. So avisamos quando a conta nao consegue se renovar.
+      const canAutoRenewToken = hasRefreshToken;
       const tokenExpired = Boolean(
         hasAccessToken && tokenExpiresAtMs && tokenExpiresAtMs <= nowMs
       );
       const tokenExpiringSoon = Boolean(
         hasAccessToken &&
+          !canAutoRenewToken &&
           tokenExpiresAtMs &&
-          tokenExpiresAtMs > nowMs &&
-          tokenExpiresAtMs - nowMs <= 1000 * 60 * 60 * 48
+          tokenExpiresAtMs > nowMs
       );
       const connected =
         Boolean(account.isActive) &&
@@ -130,16 +135,14 @@ async function getIntegrationHub(request = {}) {
       )?.toISOString?.() || null;
 
       let tokenStatus = "Sem token";
-      if (hasAccessToken && tokenExpired && hasRefreshToken) {
-        tokenStatus = "Expirado (renovavel)";
+      if (canAutoRenewToken) {
+        tokenStatus = "Ativo (renovacao automatica)";
       } else if (hasAccessToken && tokenExpired) {
         tokenStatus = "Expirado";
       } else if (hasAccessToken && tokenExpiringSoon) {
         tokenStatus = "Expira em breve";
       } else if (hasAccessToken) {
         tokenStatus = "Ativo";
-      } else if (hasRefreshToken) {
-        tokenStatus = "Renovavel";
       }
 
       return {
